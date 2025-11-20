@@ -51,6 +51,12 @@ public class TcpServerOutput implements IAgentOutput {
 
 	public void startup(final AgentOptions options, final RuntimeData data)
 			throws IOException {
+		// 端口被占用则不启动TcpServer，解决宝兰德BES的端口冲突问题（address in use）
+		try (ServerSocket socket = new ServerSocket(options.getPort())) {
+			socket.setReuseAddress(true);
+		} catch (IOException e) {
+			return;
+		}
 		serverSocket = createServerSocket(options);
 		worker = new Thread(new Runnable() {
 			public void run() {
