@@ -80,8 +80,13 @@ public class OkHttpUtil {
 			@Override
 			public void onResponse(Call call, Response response) {
 				if (response.isSuccessful() && response.body() != null) {
-					System.out.println(action + " - 成功: " + response.body()
-							+ ", 请求参数: " + bodyMap);
+					try {
+						System.out.println(
+								action + " - 成功: " + response.body().string()
+										+ ", 请求参数: " + bodyMap);
+					} catch (IOException e) {
+						System.out.println(action + " - 解析响应失败: " + e);
+					}
 				} else {
 					System.out.println(action + " - 失败: " + response.message()
 							+ ", 请求参数: " + bodyMap);
