@@ -62,8 +62,10 @@ public class TcpServerOutput implements IAgentOutput {
 			String urlString = "http://qa.fzzqft.com/portaljava/codeCoverage/agent";
 			Map<String, Object> bodyMap = new HashMap<>();
 			bodyMap.put("action", "updatePort");
-			bodyMap.put("port", options.getPort());
-			OkHttpUtil.post(urlString, bodyMap, "更新代码覆盖率服务端口");
+			bodyMap.put("appName", System.getenv("APP_NAME"));
+			bodyMap.put("env", System.getenv("FOUNDERSC_ENV").toLowerCase());
+			bodyMap.put("agentPort", options.getPort());
+			OkHttpUtil.asyncPost(urlString, bodyMap, "更新代码覆盖率服务端口");
 		}
 
 		serverSocket = createServerSocket(options);
