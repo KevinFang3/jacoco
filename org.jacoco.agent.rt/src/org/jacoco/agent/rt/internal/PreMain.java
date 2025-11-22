@@ -49,7 +49,7 @@ public final class PreMain {
 		Map<String, Object> bodyMap = new HashMap<>();
 		bodyMap.put("action", "register");
 		bodyMap.put("appName", System.getenv("APP_NAME"));
-		bodyMap.put("env", System.getenv("FOUNDERSC_ENV"));
+		bodyMap.put("env", System.getenv("FOUNDERSC_ENV").toLowerCase());
 		bodyMap.put("ip", InetAddress.getLocalHost().getHostAddress());
 		OkHttpUtil.asyncPost(urlString, bodyMap, "注册至代码覆盖率服务");
 
