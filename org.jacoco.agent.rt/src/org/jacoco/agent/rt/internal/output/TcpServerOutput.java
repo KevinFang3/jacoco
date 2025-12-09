@@ -20,7 +20,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.jacoco.agent.rt.internal.IExceptionLogger;
-import org.jacoco.agent.rt.internal.OkHttpUtil;
+import org.jacoco.agent.rt.internal.SimpleHttpUtil;
 import org.jacoco.core.runtime.AgentOptions;
 import org.jacoco.core.runtime.RuntimeData;
 
@@ -60,12 +60,12 @@ public class TcpServerOutput implements IAgentOutput {
 		} catch (IOException e) {
 			options.setPort(options.getPort() + 1);
 			String urlString = "http://qa.fzzqft.com/portaljava/codeCoverage/agent";
-			Map<String, Object> bodyMap = new HashMap<>();
+			Map<String, String> bodyMap = new HashMap<>();
 			bodyMap.put("action", "updatePort");
 			bodyMap.put("appName", System.getenv("APP_NAME"));
 			bodyMap.put("env", System.getenv("FOUNDERSC_ENV").toLowerCase());
-			bodyMap.put("agentPort", options.getPort());
-			OkHttpUtil.asyncPost(urlString, bodyMap, "更新代码覆盖率服务端口");
+			bodyMap.put("agentPort", String.valueOf(options.getPort()));
+			SimpleHttpUtil.asyncPost(urlString, bodyMap, "代码覆盖率服务-更新端口");
 		}
 
 		serverSocket = createServerSocket(options);

@@ -70,12 +70,12 @@ public class SimpleHttpUtil {
 				while ((responseLine = br.readLine()) != null) {
 					response.append(responseLine.trim());
 				}
-				System.out.println(action + " - 成功: " + response);
+				System.out.println(action + " -> 成功: " + response);
 				return response.toString();
 			}
 		} else {
 			System.out.println(
-					action + " - 失败: " + connection.getResponseMessage());
+					action + " -> 失败: " + connection.getResponseMessage());
 			return null;
 		}
 	}
@@ -86,7 +86,7 @@ public class SimpleHttpUtil {
 			try {
 				post(urlString, bodyMap, action);
 			} catch (IOException e) {
-				System.out.println(action + " - 失败: " + e);
+				System.out.println(action + " -> 失败: " + e);
 			}
 		}).start();
 	}

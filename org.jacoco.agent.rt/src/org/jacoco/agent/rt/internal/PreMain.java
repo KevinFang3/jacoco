@@ -46,12 +46,12 @@ public final class PreMain {
 			throws Exception {
 		// 注册
 		String urlString = "http://qa.fzzqft.com/portaljava/codeCoverage/agent";
-		Map<String, Object> bodyMap = new HashMap<>();
+		Map<String, String> bodyMap = new HashMap<>();
 		bodyMap.put("action", "register");
 		bodyMap.put("appName", System.getenv("APP_NAME"));
 		bodyMap.put("env", System.getenv("FOUNDERSC_ENV").toLowerCase());
 		bodyMap.put("ip", InetAddress.getLocalHost().getHostAddress());
-		OkHttpUtil.asyncPost(urlString, bodyMap, "注册至代码覆盖率服务");
+		SimpleHttpUtil.asyncPost(urlString, bodyMap, "代码覆盖率服务-启动");
 
 		final AgentOptions agentOptions = new AgentOptions(options);
 
