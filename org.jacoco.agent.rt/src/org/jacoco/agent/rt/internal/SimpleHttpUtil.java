@@ -12,10 +12,7 @@
  *******************************************************************************/
 package org.jacoco.agent.rt.internal;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -25,6 +22,8 @@ import java.util.Map;
  * @author kevin
  */
 public class SimpleHttpUtil {
+
+	private static final String BASE_URL = "http://qa.fzzqft.com/portaljava/codeCoverage";
 
 	public static String mapToJson(Map<String, String> map) {
 		if (map == null) {
@@ -89,6 +88,68 @@ public class SimpleHttpUtil {
 				System.out.println(action + " -> 失败: " + e);
 			}
 		}).start();
+	}
+
+	public static String upload(String serverUrl, String filePath)
+			throws IOException {
+		File file = new File(filePath);
+		String boundary = "----" + System.currentTimeMillis();
+		String lineFeed = "\r\n";
+		// 构造请求
+		HttpURLConnection conn = (HttpURLConnection) new URL(serverUrl)
+				.openConnection();
+		conn.setDoOutput(true);
+		conn.setRequestMethod("POST");
+		conn.setRequestProperty("Content-Type",
+				"multipart/form-data; boundary=" + boundary);
+		// 发起请求
+		try (OutputStream os = conn.getOutputStream();
+				FileInputStream fis = new FileInputStream(file)) {
+			// 写入文件头部
+			String header = "--" + boundary + lineFeed
+					+ "Content-Disposition: form-data; name=\"file\"; filename=\""
+					+ file.getName() + "\"" + lineFeed
+					+ "Content-Type: application/octet-stream" + lineFeed
+					+ lineFeed;
+			os.write(header.getBytes());
+			// 流式传输文件
+			byte[] buffer = new byte[4096];
+			int bytesRead;
+			while ((bytesRead = fis.read(buffer)) != -1) {
+				os.write(buffer, 0, bytesRead);
+			}
+			// 结束标记
+			os.write((lineFeed + "--" + boundary + "--" + lineFeed).getBytes());
+		}
+		// 读取响应
+		try (BufferedReader br = new BufferedReader(new InputStreamReader(
+				conn.getResponseCode() >= 400 ? conn.getErrorStream()
+						: conn.getInputStream()))) {
+			StringBuilder response = new StringBuilder();
+			String line;
+			while ((line = br.readLine()) != null) {
+				response.append(line);
+			}
+			return response.toString();
+		} finally {
+			conn.disconnect();
+		}
+	}
+
+	public static void asyncUpload(String serverUrl, String filePath) {
+		new Thread(() -> {
+			try {
+				upload(serverUrl, filePath);
+			} catch (IOException e) {
+				System.out.println("上传失败: " + e);
+			}
+		}).start();
+	}
+
+	public static void main(String[] args) throws IOException {
+		String result = upload(BASE_URL + "/upload",
+				"/Users/kevin/Downloads/FSTORE性能测试文件.rar");
+		System.out.println(result);
 	}
 
 }
