@@ -13,7 +13,9 @@
 package org.jacoco.core.internal.flow;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
+import java.lang.reflect.Field;
 import java.util.Arrays;
 
 import org.jacoco.core.instr.MethodRecorder;
@@ -84,6 +86,14 @@ public class MethodProbesAdapterTest implements IProbeIdGenerator {
 				Label[] labels, IFrame frame) {
 			rec("visitLookupSwitchInsnWithProbes", dflt, keys, labels);
 			frame.accept(this);
+		}
+
+		@Override
+		public void visitMethodInsn(int opcode, String owner, String name,
+				String desc, boolean itf) {
+			rec("visitMethodInsn",
+					Integer.valueOf(opcode), owner, name, desc,
+					Boolean.valueOf(itf));
 		}
 
 		private void rec(String name, Object... args) {
@@ -447,6 +457,75 @@ public class MethodProbesAdapterTest implements IProbeIdGenerator {
 		expectedVisitor.visitLabel(handlerEnd);
 		expectedVisitor.visitInsnWithProbe(Opcodes.ATHROW, 1002);
 		expectedVisitor.visitLabel(after);
+	}
+
+	/**
+	 * 插桩路径改写：Class.getDeclaredFields() 调用点应改为
+	 * INVOKESTATIC {@link MethodProbesAdapter#getDeclaredFields(Class)}，
+	 * 屏蔽插桩注入的 {@code $jacocoData} 字段被反射遍历到。
+	 */
+	@Test
+	public void testGetDeclaredFieldsCallIsRewritten() {
+		MethodRecorder expected = new MethodRecorder();
+		MethodProbesVisitor expectedVisitor = new TraceAdapter(expected);
+		MethodRecorder actual = new MethodRecorder();
+		MethodProbesAdapter probesAdapter = new MethodProbesAdapter(
+				new TraceAdapter(actual), this);
+
+		probesAdapter.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Class",
+				"getDeclaredFields", "()[Ljava/lang/reflect/Field;", false);
+
+		expectedVisitor.visitMethodInsn(Opcodes.INVOKESTATIC,
+				"org/jacoco/core/internal/flow/MethodProbesAdapter",
+				"getDeclaredFields",
+				"(Ljava/lang/Class;)[Ljava/lang/reflect/Field;", false);
+
+		assertEquals(expected, actual);
+	}
+
+	/**
+	 * 仅重写 getDeclaredFields() 调用，其余方法调用（如 getDeclaredField）
+	 * 原样传递。
+	 */
+	@Test
+	public void testOtherMethodInsnsAreNotRewritten() {
+		MethodRecorder expected = new MethodRecorder();
+		MethodProbesVisitor expectedVisitor = new TraceAdapter(expected);
+		MethodRecorder actual = new MethodRecorder();
+		MethodProbesAdapter probesAdapter = new MethodProbesAdapter(
+				new TraceAdapter(actual), this);
+
+		probesAdapter.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Class",
+				"getDeclaredField",
+				"(Ljava/lang/String;)Ljava/lang/reflect/Field;", false);
+
+		expectedVisitor.visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+				"java/lang/Class", "getDeclaredField",
+				"(Ljava/lang/String;)Ljava/lang/reflect/Field;", false);
+
+		assertEquals(expected, actual);
+	}
+
+	/**
+	 * 过滤方法：$jacocoData 字段被剔除，普通字段保留；
+	 * 无 jacoco 注入字段时原样返回（不重建数组）。
+	 */
+	@Test
+	public void testGetDeclaredFieldsFromAdapterFiltersJacocoField() {
+		final Field[] fields = MethodProbesAdapter
+				.getDeclaredFields(MockBean.class);
+		assertTrue(Arrays.stream(fields).allMatch(
+				f -> !f.getName().equals("$jacocoData")));
+		assertTrue(Arrays.stream(fields).anyMatch(
+				f -> f.getName().equals("regular")));
+	}
+
+	private static class MockBean {
+		@SuppressWarnings("unused")
+		static final String $jacocoData = "jacoco-injected";
+
+		@SuppressWarnings("unused")
+		String regular;
 	}
 
 	// === IProbeIdGenerator ===

@@ -45,7 +45,7 @@ public final class PreMain {
 	public static void premain(final String options, final Instrumentation inst)
 			throws Exception {
 		// 注册
-		String urlString = "http://qa.fzzqft.com/portaljava/codeCoverage/agent";
+		String urlString = SimpleHttpUtil.baseUrl();
 		Map<String, String> bodyMap = new HashMap<>();
 		bodyMap.put("action", "register");
 		bodyMap.put("appName", System.getenv("APP_NAME"));
@@ -56,6 +56,14 @@ public final class PreMain {
 		final AgentOptions agentOptions = new AgentOptions(options);
 
 		final Agent agent = Agent.getInstance(agentOptions);
+
+		// 门户端发起 jar 下载（http）服务：agent 启动完成后开启，
+		// 此时 options.getPort() 已是最终 dump 端口（TcpServerOutput 冲突自增后）
+		try {
+			JarDownloadServer.start(agentOptions);
+		} catch (Exception e) {
+			System.out.println("[jacoco-download] 启动失败: " + e);
+		}
 
 		final IRuntime runtime = createRuntime(inst);
 		runtime.startup(agent.getData());

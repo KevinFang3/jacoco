@@ -25,6 +25,11 @@ public class SimpleHttpUtil {
 
 	private static final String BASE_URL = "http://qa.fzzqft.com/portaljava/codeCoverage";
 
+	/** 门户口径的注册/上报地址（JarDownloadServer 等复用） */
+	static String baseUrl() {
+		return BASE_URL + "/agent";
+	}
+
 	public static String mapToJson(Map<String, String> map) {
 		if (map == null) {
 			return "null";
