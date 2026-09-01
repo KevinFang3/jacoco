@@ -47,7 +47,7 @@ import com.sun.net.httpserver.HttpServer;
  * {@code .jar}/{@code .war} 后缀；</li>
  * <li><b>端口</b>：默认 dump TCP 端口 <b>+100</b>（可用系统属性 {@code jacoco.httpPort}
  * 覆盖），被占用自动 +1（与 {@link org.jacoco.agent.rt.internal.output.TcpServerOutput}
- * 端口冲突处理一致）。启动成功后以 <b>action=updateHttpPort</b> 上报实际绑定端口 （门户存至
+ * 端口冲突处理一致）。启动成功后以 <b>action=reportHttpPort</b> 上报实际绑定端口 （门户存至
  * {@code code_coverage_app.http_port}）， 门户下载优先取该值，冲突自增时按 {@code agentPort+100}
  * 推算仅为兜底。</li>
  * </ul>
@@ -95,7 +95,7 @@ public class JarDownloadServer {
 		final int port = httpServer.getAddress().getPort();
 		// 上报实际绑定端口（app.code_coverage_app.http_port）：
 		// 端口冲突自增后门户按 agentPort+100 推算会失配，以本上报值为准
-		SimpleHttpUtil.asyncReportPort("updateHttpPort", "httpPort",
+		SimpleHttpUtil.asyncReportPort("reportHttpPort", "httpPort",
 				String.valueOf(port));
 		System.out.println("[jacoco-download] http 下载服务已启动: port=" + port);
 	}
@@ -131,15 +131,19 @@ public class JarDownloadServer {
 
 	private static void handleDownload(final HttpExchange exchange)
 			throws IOException {
+		final long start = System.currentTimeMillis();
 		try {
 			final String path;
 			try {
 				path = resolveTarget(exchange);
 			} catch (IllegalArgumentException e) {
+				System.out.println("[jacoco-download] 下载失败: " + e.getMessage());
 				sendText(exchange, 400, e.getMessage());
 				return;
 			}
 			if (path == null) {
+				System.out.println(
+						"[jacoco-download] 下载失败: not found or not allowed");
 				sendText(exchange, 404, "not found or not allowed");
 				return;
 			}
@@ -157,7 +161,13 @@ public class JarDownloadServer {
 				while ((n = in.read(buffer)) != -1) {
 					out.write(buffer, 0, n);
 				}
+			} catch (IOException e) {
+				System.out.println("[jacoco-download] 下载失败(传输中断): " + e);
+				throw e;
 			}
+			System.out.println("[jacoco-download] 下载完成: " + file.getName()
+					+ ", " + length + " bytes, "
+					+ (System.currentTimeMillis() - start) + " ms");
 		} finally {
 			exchange.close();
 		}

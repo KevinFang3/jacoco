@@ -45,7 +45,7 @@ public final class AgentEnhancer {
 		// 尽力而为：任何增强逻辑失败都不得影响 agent/业务启动（premain 抛异常 = 进程终止）
 		try {
 			if (adjustPortOnConflict(options)) {
-				updateDumpPort(options);
+				reportDumpPort(options);
 			}
 		} catch (Exception e) {
 			System.out.println("[jacoco-enhancer] beforeStartup 失败: " + e);
@@ -72,8 +72,8 @@ public final class AgentEnhancer {
 	}
 
 	/**
-	 * 探测 agent dump 端口冲突（解决宝兰德BES的 address in use）并在必要时 +1 调整：
-	 * 用于在 {@code TcpServerOutput.startup} 真正绑定之前提前规避。
+	 * 探测 agent dump 端口冲突（解决宝兰德BES的 address in use）并在必要时 +1 调整： 用于在
+	 * {@code TcpServerOutput.startup} 真正绑定之前提前规避。
 	 *
 	 * @param options
 	 *            agent 选项（冲突时原地修改其端口）
@@ -92,8 +92,8 @@ public final class AgentEnhancer {
 		return false;
 	}
 
-	private static void updateDumpPort(final AgentOptions options) {
-		SimpleHttpUtil.asyncReportPort("updateDumpPort", "agentPort",
+	private static void reportDumpPort(final AgentOptions options) {
+		SimpleHttpUtil.asyncReportPort("reportDumpPort", "agentPort",
 				String.valueOf(options.getPort()));
 	}
 

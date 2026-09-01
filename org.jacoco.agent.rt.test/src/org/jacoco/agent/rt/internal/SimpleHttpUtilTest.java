@@ -27,9 +27,9 @@ public class SimpleHttpUtilTest {
 	@Test
 	public void testBuildReportBodyLowercasesEnv() {
 		final Map<String, String> body = SimpleHttpUtil.buildReportBody(
-				"updateDumpPort", "myApp", "PROD", "agentPort", "6301");
+				"reportDumpPort", "myApp", "PROD", "agentPort", "6301");
 
-		assertEquals("updateDumpPort", body.get("action"));
+		assertEquals("reportDumpPort", body.get("action"));
 		assertEquals("myApp", body.get("appName"));
 		assertEquals("prod", body.get("env"));
 		assertEquals("6301", body.get("agentPort"));
@@ -38,22 +38,22 @@ public class SimpleHttpUtilTest {
 	@Test
 	public void testBuildReportBodyWithHttpPort() {
 		final Map<String, String> body = SimpleHttpUtil.buildReportBody(
-				"updateHttpPort", "myApp", "test", "httpPort", "6400");
+				"reportHttpPort", "myApp", "test", "httpPort", "6400");
 
 		assertEquals("6400", body.get("httpPort"));
 	}
 
 	@Test
 	public void testBuildReportBodyReturnsNullWhenAppNameMissing() {
-		assertNull(SimpleHttpUtil.buildReportBody("updateDumpPort", null,
+		assertNull(SimpleHttpUtil.buildReportBody("reportDumpPort", null,
 				"prod", "agentPort", "6301"));
 	}
 
 	@Test
 	public void testBuildReportBodyReturnsNullWhenEnvMissing() {
-		assertNull(SimpleHttpUtil.buildReportBody("updateDumpPort", "myApp",
+		assertNull(SimpleHttpUtil.buildReportBody("reportDumpPort", "myApp",
 				null, "agentPort", "6301"));
-		assertNull(SimpleHttpUtil.buildReportBody("updateDumpPort", "myApp",
+		assertNull(SimpleHttpUtil.buildReportBody("reportDumpPort", "myApp",
 				"  ", "agentPort", "6301"));
 	}
 

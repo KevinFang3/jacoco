@@ -12,7 +12,10 @@
  *******************************************************************************/
 package org.jacoco.agent.rt.internal;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -21,8 +24,8 @@ import java.util.Map;
 import java.util.StringJoiner;
 
 /**
- * 门户口径的 HTTP 客户端工具：json 上报（updateDumpPort/updateHttpPort），
- * 尽力而为、异常不外传；上报线程为 daemon，不阻塞进程退出。
+ * 门户口径的 HTTP 客户端工具：json 上报（reportDumpPort/reportHttpPort）， 尽力而为、异常不外传；上报线程为
+ * daemon，不阻塞进程退出。
  * <p>
  * 所用地址见 {@link #baseUrl()}。
  *
@@ -42,7 +45,7 @@ public class SimpleHttpUtil {
 	 * {@code code_coverage_app.env}）。
 	 *
 	 * @param action
-	 *            上报动作（如 updateDumpPort / updateHttpPort）
+	 *            上报动作（如 reportDumpPort / reportHttpPort）
 	 * @param appName
 	 *            应用名（{@code APP_NAME} 环境变量）
 	 * @param envValue
@@ -72,7 +75,7 @@ public class SimpleHttpUtil {
 	 * 缺失时跳过并打日志（避免向门户发送无法匹配的请求）。
 	 *
 	 * @param action
-	 *            上报动作（如 updateDumpPort / updateHttpPort）
+	 *            上报动作（如 reportDumpPort / reportHttpPort）
 	 * @param portField
 	 *            端口字段名（agentPort / httpPort）
 	 * @param portValue
@@ -85,11 +88,11 @@ public class SimpleHttpUtil {
 		final Map<String, String> bodyMap = buildReportBody(action, appName,
 				envValue, portField, portValue);
 		if (bodyMap == null) {
-			System.out.println("[jacoco-report] " + action
-					+ " 跳过：APP_NAME/FOUNDERSC_ENV 未设置");
+			System.out.println("[jacoco-" + action + "] 上报最新端口(" + portValue
+					+ ")跳过: APP_NAME/FOUNDERSC_ENV 未设置");
 			return;
 		}
-		asyncPost(baseUrl(), bodyMap, "代码覆盖率服务-" + action);
+		asyncPost(baseUrl(), bodyMap, action, portValue);
 	}
 
 	private static boolean isMissing(final String value) {
@@ -110,7 +113,7 @@ public class SimpleHttpUtil {
 	}
 
 	public static String post(String urlString, Map<String, String> bodyMap,
-			String action) throws IOException {
+			String action, String portValue) throws IOException {
 		// 构造请求
 		URL url = new URL(urlString);
 		HttpURLConnection connection = (HttpURLConnection) url.openConnection();
@@ -136,23 +139,25 @@ public class SimpleHttpUtil {
 				while ((responseLine = br.readLine()) != null) {
 					response.append(responseLine.trim());
 				}
-				System.out.println(action + " -> 成功: " + response);
+				System.out.println("[jacoco-" + action + "] 上报最新端口(" + portValue
+						+ ")成功: " + response);
 				return response.toString();
 			}
 		} else {
-			System.out.println(
-					action + " -> 失败: " + connection.getResponseMessage());
+			System.out.println("[jacoco-" + action + "] 上报最新端口(" + portValue
+					+ ")失败: " + connection.getResponseMessage());
 			return null;
 		}
 	}
 
 	public static void asyncPost(String urlString, Map<String, String> bodyMap,
-			String action) {
+			String action, String portValue) {
 		Thread t = new Thread(() -> {
 			try {
-				post(urlString, bodyMap, action);
+				post(urlString, bodyMap, action, portValue);
 			} catch (IOException e) {
-				System.out.println(action + " -> 失败: " + e);
+				System.out.println("[jacoco-" + action + "] 上报最新端口(" + portValue
+						+ ")失败: " + e);
 			}
 		});
 		t.setDaemon(true);
