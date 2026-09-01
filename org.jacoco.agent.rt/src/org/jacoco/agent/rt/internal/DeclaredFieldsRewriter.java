@@ -37,6 +37,11 @@ import org.objectweb.asm.Opcodes;
  * <p>
  * 改写发生时探针布局已完成（本 module 不触碰 org.jacoco.core）， 且 INVOKEVIRTUAL → INVOKESTATIC 的
  * receiver 原地转为显式参数， 操作数栈形状不变，不影响已有栈帧。
+ * <p>
+ * 只改写"目标类加载器可解析到 agent runtime（本类）"的类：bootstrap 类（loader 为 null，如 JDK 的
+ * java.io.ObjectStreamClass）与隔离类加载器（如 OTel AgentClassLoader）均解析不到 runtime
+ * 类，改写出的 INVOKESTATIC 运行时必然 NoClassDefFoundError——前者导致 JDK 序列化路径全局崩溃（应用启动失败），
+ * 后者导致 OTel 所有插桩模块加载失败。
  */
 public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 
@@ -52,6 +57,11 @@ public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 			final ProtectionDomain protectionDomain,
 			final byte[] classfileBuffer) throws IllegalClassFormatException {
 		if (className == null) {
+			return null;
+		}
+		// 与 jacoco 插桩器 CoverageTransformer#filter 一致地跳过 bootstrap 类
+		// （inclbootstrapclasses 默认关闭）；隔离类加载器同理跳过
+		if (loader == null || !isRuntimeVisibleTo(loader)) {
 			return null;
 		}
 		try {
@@ -93,6 +103,24 @@ public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 		} catch (RuntimeException e) {
 			// 字节码异常时保持原样：改写失败不得破坏该类的加载
 			return null;
+		}
+	}
+
+	/**
+	 * 判断目标加载器能否解析到 agent runtime（本类）：改写出的 INVOKESTATIC 由被改写类所在加载器解析，解析不到即运行时
+	 * NoClassDefFoundError。
+	 *
+	 * @param loader
+	 *            目标类的加载器（已确保非 null）
+	 * @return runtime 类对目标加载器可见时返回 <code>true</code>
+	 */
+	private static boolean isRuntimeVisibleTo(final ClassLoader loader) {
+		try {
+			Class.forName(DeclaredFieldsRewriter.class.getName(), false,
+					loader);
+			return true;
+		} catch (ClassNotFoundException | LinkageError e) {
+			return false;
 		}
 	}
 

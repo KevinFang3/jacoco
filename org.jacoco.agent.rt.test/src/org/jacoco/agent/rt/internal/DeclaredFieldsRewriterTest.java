@@ -18,6 +18,8 @@ import static org.junit.Assert.assertTrue;
 
 import java.lang.instrument.IllegalClassFormatException;
 import java.lang.reflect.Field;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -37,8 +39,9 @@ public class DeclaredFieldsRewriterTest {
 	@Test
 	public void testGetDeclaredFieldsCallIsRewritten()
 			throws IllegalClassFormatException {
-		byte[] result = new DeclaredFieldsRewriter().transform(null,
-				"SampleBean", null, null, sampleClassBytes("getDeclaredFields",
+		byte[] result = new DeclaredFieldsRewriter().transform(
+				getClass().getClassLoader(), "SampleBean", null, null,
+				sampleClassBytes("getDeclaredFields",
 						"()[Ljava/lang/reflect/Field;"));
 
 		assertEquals(Opcodes.INVOKESTATIC,
@@ -52,8 +55,9 @@ public class DeclaredFieldsRewriterTest {
 	@Test
 	public void testOtherMethodInsnsAreNotRewritten()
 			throws IllegalClassFormatException {
-		byte[] result = new DeclaredFieldsRewriter().transform(null,
-				"SampleBean", null, null, sampleClassBytes("getDeclaredField",
+		byte[] result = new DeclaredFieldsRewriter().transform(
+				getClass().getClassLoader(), "SampleBean", null, null,
+				sampleClassBytes("getDeclaredField",
 						"(Ljava/lang/String;)Ljava/lang/reflect/Field;"));
 
 		// 非目标调用点：不改写（返回 null，不产生新字节码）
@@ -63,8 +67,41 @@ public class DeclaredFieldsRewriterTest {
 	@Test
 	public void testTransformReturnsNullWithoutRewrite()
 			throws IllegalClassFormatException {
+		byte[] result = new DeclaredFieldsRewriter().transform(
+				getClass().getClassLoader(), "SampleBean", null, null,
+				plainClassBytes());
+
+		assertNull(result);
+	}
+
+	/**
+	 * bootstrap 类（loader 为 null，如 JDK 的 java.io.ObjectStreamClass）不可 改写：agent
+	 * runtime 类对 bootstrap 类加载器不可见，改写后其 INVOKESTATIC 必然 NoClassDefFoundError（线上
+	 * Spring 启动即因 ObjectStreamClass 被改写而失败）。 与 jacoco 插桩器默认跳过 bootstrap 类
+	 * （CoverageTransformer#filter，inclbootstrapclasses 默认关闭）保持一致。
+	 */
+	@Test
+	public void testBootstrapClassLoaderIsNotRewritten()
+			throws IllegalClassFormatException {
 		byte[] result = new DeclaredFieldsRewriter().transform(null,
-				"SampleBean", null, null, plainClassBytes());
+				"SampleBean", null, null, sampleClassBytes("getDeclaredFields",
+						"()[Ljava/lang/reflect/Field;"));
+
+		assertNull(result);
+	}
+
+	/**
+	 * 隔离类加载器（如 OTel AgentClassLoader，其父链上不含 agent runtime）： 改写出的 INVOKESTATIC
+	 * 同样解析不到 DeclaredFieldsRewriter，应跳过， 否则 OTel 各类插桩模块全部加载失败（Unable to load
+	 * instrumentation）。
+	 */
+	@Test
+	public void testIsolatedClassLoaderIsNotRewritten()
+			throws IllegalClassFormatException {
+		final ClassLoader isolated = new URLClassLoader(new URL[0], null);
+		byte[] result = new DeclaredFieldsRewriter().transform(isolated,
+				"SampleBean", null, null, sampleClassBytes("getDeclaredFields",
+						"()[Ljava/lang/reflect/Field;"));
 
 		assertNull(result);
 	}
