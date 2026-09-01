@@ -16,11 +16,8 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.UnknownHostException;
-import java.util.HashMap;
-import java.util.Map;
 
 import org.jacoco.agent.rt.internal.IExceptionLogger;
-import org.jacoco.agent.rt.internal.SimpleHttpUtil;
 import org.jacoco.core.runtime.AgentOptions;
 import org.jacoco.core.runtime.RuntimeData;
 
@@ -54,20 +51,6 @@ public class TcpServerOutput implements IAgentOutput {
 
 	public void startup(final AgentOptions options, final RuntimeData data)
 			throws IOException {
-		// 被占用则端口号+1，解决宝兰德BES的端口冲突问题（address in use）
-		try (ServerSocket socket = new ServerSocket(options.getPort())) {
-			socket.setReuseAddress(true);
-		} catch (IOException e) {
-			options.setPort(options.getPort() + 1);
-			String urlString = "http://qa.fzzqft.com/portaljava/codeCoverage/agent";
-			Map<String, String> bodyMap = new HashMap<>();
-			bodyMap.put("action", "updatePort");
-			bodyMap.put("appName", System.getenv("APP_NAME"));
-			bodyMap.put("env", System.getenv("FOUNDERSC_ENV").toLowerCase());
-			bodyMap.put("agentPort", String.valueOf(options.getPort()));
-			SimpleHttpUtil.asyncPost(urlString, bodyMap, "代码覆盖率服务-更新端口");
-		}
-
 		serverSocket = createServerSocket(options);
 		worker = new Thread(new Runnable() {
 			public void run() {

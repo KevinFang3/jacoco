@@ -16,35 +16,97 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.StringJoiner;
 
 /**
+ * 门户口径的 HTTP 客户端工具：json 上报（updateDumpPort/updateHttpPort），
+ * 尽力而为、异常不外传；上报线程为 daemon，不阻塞进程退出。
+ * <p>
+ * 所用地址见 {@link #baseUrl()}。
+ *
  * @author kevin
  */
 public class SimpleHttpUtil {
 
 	private static final String BASE_URL = "http://qa.fzzqft.com/portaljava/codeCoverage";
 
-	/** 门户口径的注册/上报地址（JarDownloadServer 等复用） */
+	/** 门户口径的上报地址（JarDownloadServer 等复用） */
 	static String baseUrl() {
 		return BASE_URL + "/agent";
+	}
+
+	/**
+	 * 组装端口上报 body（appName/env 任一缺失返回 {@code null}，不应发送）： env 统一转小写（门户按小写匹配
+	 * {@code code_coverage_app.env}）。
+	 *
+	 * @param action
+	 *            上报动作（如 updateDumpPort / updateHttpPort）
+	 * @param appName
+	 *            应用名（{@code APP_NAME} 环境变量）
+	 * @param envValue
+	 *            环境（{@code FOUNDERSC_ENV} 环境变量）
+	 * @param portField
+	 *            端口字段名（agentPort / httpPort）
+	 * @param portValue
+	 *            端口值
+	 * @return 组装好的 body；appName/env 缺失时返回 null
+	 */
+	public static Map<String, String> buildReportBody(final String action,
+			final String appName, final String envValue, final String portField,
+			final String portValue) {
+		if (isMissing(appName) || isMissing(envValue)) {
+			return null;
+		}
+		final Map<String, String> bodyMap = new HashMap<>();
+		bodyMap.put("action", action);
+		bodyMap.put("appName", appName);
+		bodyMap.put("env", envValue.toLowerCase());
+		bodyMap.put(portField, portValue);
+		return bodyMap;
+	}
+
+	/**
+	 * 端口变更上报（尽力而为）：从环境变量取 appName/env 组装 body 后异步 POST； appName/env
+	 * 缺失时跳过并打日志（避免向门户发送无法匹配的请求）。
+	 *
+	 * @param action
+	 *            上报动作（如 updateDumpPort / updateHttpPort）
+	 * @param portField
+	 *            端口字段名（agentPort / httpPort）
+	 * @param portValue
+	 *            端口值
+	 */
+	public static void asyncReportPort(final String action,
+			final String portField, final String portValue) {
+		final String appName = System.getenv("APP_NAME");
+		final String envValue = System.getenv("FOUNDERSC_ENV");
+		final Map<String, String> bodyMap = buildReportBody(action, appName,
+				envValue, portField, portValue);
+		if (bodyMap == null) {
+			System.out.println("[jacoco-report] " + action
+					+ " 跳过：APP_NAME/FOUNDERSC_ENV 未设置");
+			return;
+		}
+		asyncPost(baseUrl(), bodyMap, "代码覆盖率服务-" + action);
+	}
+
+	private static boolean isMissing(final String value) {
+		return value == null || value.trim().isEmpty();
 	}
 
 	public static String mapToJson(Map<String, String> map) {
 		if (map == null) {
 			return "null";
 		}
-		StringBuilder sb = new StringBuilder("{");
-		boolean first = true;
+		StringJoiner joiner = new StringJoiner(",", "{", "}");
 		for (Map.Entry<String, String> entry : map.entrySet()) {
-			if (!first) {
-				sb.append(",");
-			}
-			sb.append("\"").append(entry.getKey()).append("\":\"")
-					.append(entry.getValue()).append("\"");
-			first = false;
+			final String value = entry.getValue();
+			joiner.add("\"" + entry.getKey() + "\":"
+					+ (value == null ? "null" : "\"" + value + "\""));
 		}
-		return sb.append("}").toString();
+		return joiner.toString();
 	}
 
 	public static String post(String urlString, Map<String, String> bodyMap,
@@ -86,75 +148,15 @@ public class SimpleHttpUtil {
 
 	public static void asyncPost(String urlString, Map<String, String> bodyMap,
 			String action) {
-		new Thread(() -> {
+		Thread t = new Thread(() -> {
 			try {
 				post(urlString, bodyMap, action);
 			} catch (IOException e) {
 				System.out.println(action + " -> 失败: " + e);
 			}
-		}).start();
-	}
-
-	public static String upload(String serverUrl, String filePath)
-			throws IOException {
-		File file = new File(filePath);
-		String boundary = "----" + System.currentTimeMillis();
-		String lineFeed = "\r\n";
-		// 构造请求
-		HttpURLConnection conn = (HttpURLConnection) new URL(serverUrl)
-				.openConnection();
-		conn.setDoOutput(true);
-		conn.setRequestMethod("POST");
-		conn.setRequestProperty("Content-Type",
-				"multipart/form-data; boundary=" + boundary);
-		// 发起请求
-		try (OutputStream os = conn.getOutputStream();
-				FileInputStream fis = new FileInputStream(file)) {
-			// 写入文件头部
-			String header = "--" + boundary + lineFeed
-					+ "Content-Disposition: form-data; name=\"file\"; filename=\""
-					+ file.getName() + "\"" + lineFeed
-					+ "Content-Type: application/octet-stream" + lineFeed
-					+ lineFeed;
-			os.write(header.getBytes());
-			// 流式传输文件
-			byte[] buffer = new byte[4096];
-			int bytesRead;
-			while ((bytesRead = fis.read(buffer)) != -1) {
-				os.write(buffer, 0, bytesRead);
-			}
-			// 结束标记
-			os.write((lineFeed + "--" + boundary + "--" + lineFeed).getBytes());
-		}
-		// 读取响应
-		try (BufferedReader br = new BufferedReader(new InputStreamReader(
-				conn.getResponseCode() >= 400 ? conn.getErrorStream()
-						: conn.getInputStream()))) {
-			StringBuilder response = new StringBuilder();
-			String line;
-			while ((line = br.readLine()) != null) {
-				response.append(line);
-			}
-			return response.toString();
-		} finally {
-			conn.disconnect();
-		}
-	}
-
-	public static void asyncUpload(String serverUrl, String filePath) {
-		new Thread(() -> {
-			try {
-				upload(serverUrl, filePath);
-			} catch (IOException e) {
-				System.out.println("上传失败: " + e);
-			}
-		}).start();
-	}
-
-	public static void main(String[] args) throws IOException {
-		String result = upload(BASE_URL + "/upload",
-				"/Users/kevin/Downloads/FSTORE性能测试文件.rar");
-		System.out.println(result);
+		});
+		t.setDaemon(true);
+		t.start();
 	}
 
 }

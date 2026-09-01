@@ -13,9 +13,6 @@
 package org.jacoco.agent.rt.internal;
 
 import java.lang.instrument.Instrumentation;
-import java.net.InetAddress;
-import java.util.HashMap;
-import java.util.Map;
 
 import org.jacoco.core.runtime.AgentOptions;
 import org.jacoco.core.runtime.IRuntime;
@@ -44,31 +41,21 @@ public final class PreMain {
 	 */
 	public static void premain(final String options, final Instrumentation inst)
 			throws Exception {
-		// 注册
-		String urlString = SimpleHttpUtil.baseUrl();
-		Map<String, String> bodyMap = new HashMap<>();
-		bodyMap.put("action", "register");
-		bodyMap.put("appName", System.getenv("APP_NAME"));
-		bodyMap.put("env", System.getenv("FOUNDERSC_ENV").toLowerCase());
-		bodyMap.put("ip", InetAddress.getLocalHost().getHostAddress());
-		SimpleHttpUtil.asyncPost(urlString, bodyMap, "代码覆盖率服务-启动");
 
 		final AgentOptions agentOptions = new AgentOptions(options);
 
-		final Agent agent = Agent.getInstance(agentOptions);
+		// 门户端集成钩子（AgentEnhancer）：升级原版 jacoco 时按 premain 流程插回
+		AgentEnhancer.beforeStartup(agentOptions);
 
-		// 门户端发起 jar 下载（http）服务：agent 启动完成后开启，
-		// 此时 options.getPort() 已是最终 dump 端口（TcpServerOutput 冲突自增后）
-		try {
-			JarDownloadServer.start(agentOptions);
-		} catch (Exception e) {
-			System.out.println("[jacoco-download] 启动失败: " + e);
-		}
+		final Agent agent = Agent.getInstance(agentOptions);
 
 		final IRuntime runtime = createRuntime(inst);
 		runtime.startup(agent.getData());
 		inst.addTransformer(new CoverageTransformer(runtime, agentOptions,
 				IExceptionLogger.SYSTEM_ERR));
+
+		// 在 jacoco 插桩器之后注册（JVM 按注册顺序回调：先插桩、后改写）
+		AgentEnhancer.afterStartup(agentOptions, inst);
 	}
 
 	private static IRuntime createRuntime(final Instrumentation inst)

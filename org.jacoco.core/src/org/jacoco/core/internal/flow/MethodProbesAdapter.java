@@ -12,8 +12,6 @@
  *******************************************************************************/
 package org.jacoco.core.internal.flow;
 
-import java.lang.reflect.Field;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -184,58 +182,6 @@ public final class MethodProbesAdapter extends MethodVisitor {
 
 	private IFrame frame(final int popCount) {
 		return FrameSnapshot.create(analyzer, popCount);
-	}
-
-	/**
-	 * 屏蔽反射感知到的 jacoco 插桩字段（{@link InstrSupport#DATAFIELD_NAME}）：
-	 * 插桩会给被插桩类注入静态 synthetic 字段 {@code $jacocoData}，业务代码/框架
-	 * 通过反射遍历 {@code Class.getDeclaredFields()} 时会把该字段当作业务字段处理
-	 * （序列化、Bean 拷贝、反射工具等出现污染）。
-	 * <p>
-	 * 改写把 {@code Class.getDeclaredFields()} 调用点改为
-	 * {@link #getDeclaredFields(Class)} —— 仅过滤掉 jacoco 注入字段，
-	 * 其余字段（含 CGLIB 等代理生成的合成字段）原样返回，相比 jacoco-czx
-	 * 的"过滤全部 synthetic"更精准、更少副作用。
-	 * <p>
-	 * 改写发生在插桩路径（{@code MethodProbesAdapter} 由
-	 * {@link org.jacoco.core.instr.Instrumenter} 在类加载时驱动），
-	 * 效果持久写入被插桩类字节码；分析路径使用同一适配器，
-	 * 逻辑改写与插桩产物一致，探针布局不受影响。
-	 */
-	@Override
-	public void visitMethodInsn(int opcode, String owner, String name,
-			String descriptor, boolean isInterface) {
-		if ("java/lang/Class".equals(owner) && "getDeclaredFields".equals(name)
-				&& "()[Ljava/lang/reflect/Field;".equals(descriptor)) {
-			super.visitMethodInsn(Opcodes.INVOKESTATIC,
-					"org/jacoco/core/internal/flow/MethodProbesAdapter",
-					"getDeclaredFields",
-					"(Ljava/lang/Class;)[Ljava/lang/reflect/Field;", false);
-		} else {
-			super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
-		}
-	}
-
-	/**
-	 * 被插桩类的 {@code getDeclaredFields()} 替代实现：
-	 * 返回的字段数组中剔除 jacoco 注入字段。
-	 *
-	 * @param clazz
-	 *            反射源类
-	 * @return 去掉 {@code $jacocoData} 后的字段数组
-	 */
-	public static Field[] getDeclaredFields(final Class<?> clazz) {
-		final Field[] fields = clazz.getDeclaredFields();
-		for (int i = 0; i < fields.length; i++) {
-			if (InstrSupport.DATAFIELD_NAME.equals(fields[i].getName())) {
-				return Arrays.stream(fields)
-						.filter(f -> !f.getName()
-								.equals(InstrSupport.DATAFIELD_NAME))
-						.toArray(Field[]::new);
-			}
-		}
-		// 无 jacoco 注入字段（未插桩类）：原样返回，避免常见类无谓的数组重建
-		return fields;
 	}
 
 }
