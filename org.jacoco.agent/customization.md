@@ -145,20 +145,69 @@ curl -G -o app.jar "http://<agent-ip>:<httpPort>/download" \
 
 ## 8. 构建与验证
 
+### 8.1 测试
+
 ```bash
 # 全量测试（agent.rt.test 100/100，含 core.test 等全套 994 个用例通过）
 mvn -pl org.jacoco.agent.rt.test -am test -Djacoco.skip=true
 
-# 打包 jacocoagent.jar
-mvn -pl org.jacoco.agent,org.jacoco.agent.rt -am package -DskipTests
-# 产物：org.jacoco.agent/target/classes/jacocoagent.jar
-
-# 使用
-java -javaagent:/path/jacocoagent.jar=output=tcpserver,port=6300,address=0.0.0.0 -jar app.jar
+# 只跑定制相关测试（3 个测试类，13 用例）
+mvn -pl org.jacoco.agent.rt.test -am test \
+  -Dtest='DeclaredFieldsRewriterTest,AgentEnhancerTest,SimpleHttpUtilTest' \
+  -DfailIfNoTests=false -Djacoco.skip=true
 ```
 
-> 备注：测试与打包时 `-Djacoco.skip=true` 是因为本项目测试自举 jacoco agent
-> 在部分 reactor 构建下解析不到安装好的 jar（非代码问题，全量 `mvn install` 后无此现象）。
+### 8.2 打包 jacocoagent.jar
+
+**命令**（适用于当前工作区代码，含全部定制）：
+
+```bash
+mvn -pl org.jacoco.agent,org.jacoco.agent.rt -am package -DskipTests
+```
+
+- 必须同时列出 `org.jacoco.agent.rt`（编译定制源码 + shade ASM）与 `org.jacoco.agent`（组装机：合并 core + agent.rt + ASM、重定位包名、写 manifest）；
+- `-am` 连带构建依赖模块（core/report/build），保证产物为最新代码；
+- 产物：
+
+| 文件 | 说明 |
+|---|---|
+| `org.jacoco.agent/target/classes/jacocoagent.jar` | **最终使用的 agent jar** |
+| `org.jacoco.agent/target/org.jacoco.agent-0.8.14-SNAPSHOT.jar` | 主 jar（内容相同） |
+
+**产物校验**（可选，建议每次都做）：
+
+```bash
+# 1) Premain-Class 应指向 shade 重定位后的 PreMain（包名带随机 hash 属正常）
+unzip -p org.jacoco.agent/target/classes/jacocoagent.jar META-INF/MANIFEST.MF | grep -i premain
+#   → Premain-Class: org.jacoco.agent.rt.internal_xxxxxxxx.PreMain
+
+# 2) 四个定制类应存在（同样在重定位包名下）
+unzip -l org.jacoco.agent/target/classes/jacocoagent.jar | grep -E "AgentEnhancer|DeclaredFieldsRewriter|JarDownloadServer|SimpleHttpUtil"
+```
+
+**使用**：
+
+```bash
+java -javaagent:/path/jacocoagent.jar=output=tcpserver,port=6300,address=0.0.0.0 -jar app.jar
+# 看到 [jacoco-download] http 下载服务已启动: port=6400 即定制生效
+```
+
+**安装到本地仓库**（ant / maven 插件 / 其它模块引用时需要）：
+
+```bash
+mvn -pl org.jacoco.agent -am install -DskipTests
+```
+
+**常见失败**：
+
+| 现象 | 处理 |
+|---|---|
+| `spotless-maven-plugin ... format violations` | 构建流程内置格式检查，先 `mvn -pl org.jacoco.agent.rt,org.jacoco.agent.rt.test spotless:apply` 再打包 |
+| `Failed to resolve artifact org.jacoco.agent.rt:jar:all` | agent.rt 的 shade 产物未安装，先执行上面的 `install` 命令 |
+
+> 备注：测试时用 `-Djacoco.skip=true` 是因为本项目测试自举 jacoco agent，
+> 在部分 reactor 构建下 prepare-agent 会解析到 `target/classes` 目录导致 fork VM 崩溃
+> （非代码问题；全量 `mvn install` 后正常）。
 
 ---
 
