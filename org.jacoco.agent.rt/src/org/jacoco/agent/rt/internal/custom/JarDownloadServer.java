@@ -63,9 +63,11 @@ public class JarDownloadServer {
 
 	private static final int MAX_PORT_RETRY = 5;
 
-	/** 简单 token 校验：未配置时保持开放（测试环境），配置后所有接口必须携带 */
+	/** 简单 token 校验：默认启用，显式配置可覆盖，配置为 off 时关闭 */
 	private static final String TOKEN_PROPERTY = "jacoco.httpToken";
 	private static final String TOKEN_ENV = "JACOCO_AGENT_TOKEN";
+	private static final String DEFAULT_TOKEN = "albert-einstein";
+	private static final String TOKEN_OFF = "off";
 	private static final String TOKEN_HEADER = "X-Agent-Token";
 	private static final String AUTH_HEADER = "Authorization";
 	private static final String BEARER_PREFIX = "Bearer ";
@@ -306,9 +308,10 @@ public class JarDownloadServer {
 	}
 
 	/**
-	 * 简单 token 校验：配置了 {@code -Djacoco.httpToken} 或环境变量
-	 * {@code JACOCO_AGENT_TOKEN} 时，要求请求头 {@code X-Agent-Token}（或
-	 * {@code Authorization: Bearer}）匹配；未配置时保持开放（测试环境）。
+	 * 简单 token 校验：默认使用内置 token {@code albert-einstein}；可通过
+	 * {@code -Djacoco.httpToken} 或环境变量 {@code JACOCO_AGENT_TOKEN} 覆盖； 显式配置为
+	 * {@code off} 时关闭。启用时要求请求头 {@code X-Agent-Token} （或
+	 * {@code Authorization: Bearer}）匹配。
 	 */
 	private static boolean isAuthorized(final HttpExchange exchange) {
 		final String expected = expectedToken();
@@ -333,11 +336,30 @@ public class JarDownloadServer {
 	}
 
 	private static String expectedToken() {
-		String token = System.getProperty(TOKEN_PROPERTY);
+		return resolveToken(System.getProperty(TOKEN_PROPERTY),
+				System.getenv(TOKEN_ENV));
+	}
+
+	/**
+	 * 解析最终 token：显式配置 > 默认值；显式配置为 {@code off} 时关闭鉴权。
+	 *
+	 * @param propertyValue
+	 *            {@code -Djacoco.httpToken} 的值
+	 * @param envValue
+	 *            {@code JACOCO_AGENT_TOKEN} 的值
+	 * @return 生效的 token；空字符串表示关闭鉴权
+	 */
+	static String resolveToken(final String propertyValue,
+			final String envValue) {
+		String token = propertyValue;
 		if (token == null || token.trim().isEmpty()) {
-			token = System.getenv(TOKEN_ENV);
+			token = envValue;
 		}
-		return token == null ? "" : token.trim();
+		if (token == null || token.trim().isEmpty()) {
+			return DEFAULT_TOKEN;
+		}
+		token = token.trim();
+		return TOKEN_OFF.equalsIgnoreCase(token) ? "" : token;
 	}
 
 	private static Map<String, String> browseParams(final HttpExchange exchange)

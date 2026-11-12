@@ -43,6 +43,7 @@ public class JarDownloadServerHttpTest {
 	private static String originalProxyHost;
 	private static String originalProxyPort;
 	private static String originalNonProxyHosts;
+	private static String originalToken;
 
 	private static int httpPort;
 
@@ -58,6 +59,9 @@ public class JarDownloadServerHttpTest {
 		System.setProperty("http.proxyHost", "127.0.0.1");
 		System.setProperty("http.proxyPort", "1");
 		System.setProperty("http.nonProxyHosts", "127.0.0.1|localhost");
+		// 基础用例验证 GET/POST 行为，显式关闭鉴权；token 用例单独设置
+		originalToken = System.getProperty("jacoco.httpToken");
+		System.setProperty("jacoco.httpToken", "off");
 
 		final int base = freeBasePort();
 		final AgentOptions options = new AgentOptions();
@@ -71,6 +75,7 @@ public class JarDownloadServerHttpTest {
 		restoreProperty("http.proxyHost", originalProxyHost);
 		restoreProperty("http.proxyPort", originalProxyPort);
 		restoreProperty("http.nonProxyHosts", originalNonProxyHosts);
+		restoreProperty("jacoco.httpToken", originalToken);
 	}
 
 	private static void restoreProperty(final String key, final String value) {
