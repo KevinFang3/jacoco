@@ -14,6 +14,7 @@ package org.jacoco.agent.rt.internal;
 
 import java.lang.instrument.Instrumentation;
 
+import org.jacoco.agent.rt.internal.custom.AgentEnhancer;
 import org.jacoco.core.runtime.AgentOptions;
 import org.jacoco.core.runtime.IRuntime;
 import org.jacoco.core.runtime.InjectedClassRuntime;
@@ -44,12 +45,18 @@ public final class PreMain {
 
 		final AgentOptions agentOptions = new AgentOptions(options);
 
+		// 门户端集成钩子（AgentEnhancer）：升级原版 jacoco 时按 premain 流程插回
+		AgentEnhancer.beforeStartup(agentOptions);
+
 		final Agent agent = Agent.getInstance(agentOptions);
 
 		final IRuntime runtime = createRuntime(inst);
 		runtime.startup(agent.getData());
 		inst.addTransformer(new CoverageTransformer(runtime, agentOptions,
 				IExceptionLogger.SYSTEM_ERR));
+
+		// 在 jacoco 插桩器之后注册（JVM 按注册顺序回调：先插桩、后改写）
+		AgentEnhancer.afterStartup(agentOptions, inst);
 	}
 
 	private static IRuntime createRuntime(final Instrumentation inst)

@@ -104,6 +104,15 @@
           </execution>
         </executions>
       </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- 使用 release 同时约束语法、字节码版本与 API 集合，
+               避免在 JDK 17+ 上误用 Java 9+ API 后到 JDK 8 运行时才失败 -->
+          <release>8</release>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>
