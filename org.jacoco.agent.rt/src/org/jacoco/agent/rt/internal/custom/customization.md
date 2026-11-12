@@ -4,8 +4,11 @@
 > 质量门户（`http://qa.fzzqft.com/portaljava/codeCoverage/agent`），并修复
 > 老中间件（宝兰德 BES）与插桩字段带来的两个运行时问题。
 >
-> 设计目标：**定制代码全部集中在新增文件里，org.jacoco.core 与原 agent 文件
-> 保持原样，升级 JaCoCo 源码时零冲突**（唯一接线点：`PreMain` 两行钩子调用）。
+> 设计目标：**全部定制代码集中在 `org.jacoco.agent.rt.internal.custom` 子目录**，
+> org.jacoco.core 与原 agent 文件保持原样，升级 JaCoCo 源码时零冲突
+> （唯一接线点：`PreMain` 一行 import + 两行钩子调用）。
+>
+> 本文档也随代码放在 `internal/custom/customization.md`，迁移时整个目录一起拷贝。
 
 ---
 
@@ -14,8 +17,11 @@
 | 能力 | 说明 |
 |---|---|
 | 端口冲突探测 | dump 端口被占（宝兰德 BES 场景 `address in use`）提前 +1 并**上报实际端口** |
-| 门户上报 | 启动后向门户异步上报 dump 端口 / jar 下载端口（`reportDumpPort` / `reportHttpPort`） |
-| Jar 下载服务 | agent 内嵌 HTTP 服务，门户端拉取应用 jar |
+| 门户上报 | 启动后向门户异步上报 dump 端口 / jar 下载端口 / 应用本体 jar 路径（`reportDumpPort` / `reportHttpPort` / `reportJarPath`） |
+| Jar 下载服务 | agent 内嵌 HTTP 服务，门户端拉取应用 jar；`path=auto` 支持自动识别 |
+| WAR / 解压目录 | 通过 CodeSource + 目录扫描定位 WAR 或解压目录，解压目录按 WAR 布局打包 |
+| 目录浏览 | `GET /browse` 只读返回目录树元数据（测试环境排查用） |
+| 可选 token | 配置 `JACOCO_AGENT_TOKEN` 后所有接口校验 `X-Agent-Token` |
 | `$jacocoData` 反射屏蔽 | 插桩后处理：`Class.getDeclaredFields()` 调用点改写为过滤方法，剔除 jacoco 注入字段 |
 | 失败安全 | 所有增强逻辑异常不外传，**绝不阻断 agent / 业务启动**（premain 抛异常 = 进程终止，必须避免） |
 
@@ -23,25 +29,33 @@
 
 ## 2. 文件清单（全部为新增文件）
 
-生产代码（`org.jacoco.agent.rt/src/org/jacoco/agent/rt/internal/`）：
+生产代码（`org.jacoco.agent.rt/src/org/jacoco/agent/rt/internal/custom/`）：
 
 | 文件 | 职责 |
 |---|---|
 | `AgentEnhancer.java` | 生命周期增强钩子（唯一被 PreMain 接线调用的入口） |
-| `JarDownloadServer.java` | 内嵌 HTTP 下载服务 + 端口上报 |
-| `SimpleHttpUtil.java` | 门户 HTTP 客户端工具（POST 上报 / URL 常量 / body 组装） |
+| `JarDownloadServer.java` | 内嵌 HTTP 下载服务（`/download`、`/browse`）+ 端口上报 |
+| `SimpleHttpUtil.java` | 门户 HTTP 客户端工具（上报 / URL 常量 / body 组装） |
 | `DeclaredFieldsRewriter.java` | `$jacocoData` 后处理改写 transformer + 过滤静态方法 |
+| `ApplicationJarResolver.java` | `java -jar` 场景自动识别应用本体 jar |
+| `WebappArtifactResolver.java` | WAR / 解压目录自动识别与 WAR 布局打包 |
+| `DirectoryBrowser.java` | 只读目录树浏览 |
 
-测试（`org.jacoco.agent.rt.test/src/org/jacoco/agent/rt/internal/`）：
+测试（`org.jacoco.agent.rt.test/src/org/jacoco/agent/rt/internal/custom/`）：
 
 | 文件 | 覆盖 |
 |---|---|
-| `AgentEnhancerTest.java` | 端口冲突 +1 / 空闲不变 / 非法端口不抛异常（3 用例） |
-| `DeclaredFieldsRewriterTest.java` | 调用点改写 / 穿透 / 过滤 / 无改写返回 null / 畸形字节码不抛（6 用例） |
-| `SimpleHttpUtilTest.java` | 上报 body 组装、env 小写化、appName/env 缺失返回 null（4 用例） |
+| `AgentEnhancerTest.java` | 端口冲突 +1 / 空闲不变 / 非法端口不抛异常 |
+| `DeclaredFieldsRewriterTest.java` | 调用点改写 / 穿透 / 过滤 / 无改写返回 null / 畸形字节码不抛 |
+| `SimpleHttpUtilTest.java` | 上报 body 组装、IP-only、JSON 转义 |
+| `ApplicationJarResolverTest.java` | 绝对/相对路径、`-cp` 单/多条目、非 jar |
+| `WebappArtifactResolverTest.java` | WAR/解压目录识别、多应用匹配、缓存、STORED 打包 |
+| `DirectoryBrowserTest.java` | 深度/数量上限、过滤、符号链接、JSON 转义 |
+| `JarDownloadServerHttpTest.java` | GET 可用、POST 拒绝、token 校验 |
 
-原文件改动：**仅 `PreMain.java` 增加 2 行钩子调用**（+5 行含注释）；其余原文件
-（`TcpServerOutput` / `MethodProbesAdapter` / `MethodProbesAdapterTest`）均已恢复官方原样。
+原文件改动：**仅 `PreMain.java` 增加 1 行 import + 2 行钩子调用**，以及
+`org.jacoco.agent.rt/pom.xml` 的 Java 8 编译配置；其余原文件
+（`TcpServerOutput` / `MethodProbesAdapter` / `MethodProbesAdapterTest` 等）均为官方原样。
 
 ---
 
@@ -80,8 +94,12 @@ JVM 启动（-javaagent → premain）
 
 | action | 触发时机 | 字段 | 门户落库 |
 |---|---|---|---|
-| `reportDumpPort` | dump 端口被占 +1 后 | `appName / env / agentPort` | `agent_port` |
-| `reportHttpPort` | 下载服务启动成功后 | `appName / env / httpPort` | `http_port`（`agentPort+100` 仅兜底） |
+| `reportDumpPort` | dump 端口被占 +1 后 | `appName / env / ip / agentPort` | `agent_port` |
+| `reportHttpPort` | 下载服务启动成功后 | `appName / env / ip / httpPort` | `http_port`（`agentPort+100` 仅兜底） |
+| `reportJarPath` | `java -jar` 启动且识别到本体 jar | `appName / env / ip / jarPath` | `jar_path` |
+
+> 门户优先按上报的 `ip` 匹配 `deploy_ip`，`appName+env` 作为兜底，避免 `APP_NAME`
+> 与库中 `app_name` 不一致导致更新影响 0 行。
 
 ## 5. Jar 下载服务
 
@@ -96,12 +114,24 @@ JVM 启动（-javaagent → premain）
 curl -G -o app.jar "http://<agent-ip>:<httpPort>/download" \
      --data-urlencode "path=/data/apps/app.jar"
 
-# POST multipart/form-data（字段 path）亦可
+# 自动识别（java -jar 本体 jar / WAR / 解压目录）
+curl -o app.war "http://<agent-ip>:<httpPort>/download?path=auto"
+
+# 目录树浏览（只读，测试环境排查用）
+curl "http://<agent-ip>:<httpPort>/browse?path=/opt/app&depth=2&filter=jar,war"
+
+# 仅支持 GET；POST 等其他方法直接返回 400（避免请求体占用业务 JVM 内存）
 ```
 
+- `path=auto`：先按 `java -jar` 识别本体 jar，再按 CodeSource/目录扫描识别 WAR；
+  解压目录按 WAR 布局（`WEB-INF/classes` + `WEB-INF/lib`）现场打包返回
+- `/browse`：`depth` 默认 2（上限 4）、`limit` 默认 200（上限 500），流式遍历
 - 路径规则：`.jar` / `.war` 后缀；相对路径按进程工作目录（user.dir）解析；
-  **无白名单**（测试/内网环境限定，生产必须加白名单）
+  **无路径白名单**（测试/内网环境限定）
 - 响应：`application/octet-stream` + `Content-Disposition: attachment`
+- 鉴权（可选）：配置 `-Djacoco.httpToken=xxx` 或环境变量 `JACOCO_AGENT_TOKEN` 后，
+  `/download`、`/browse` 均要求请求头 `X-Agent-Token: xxx`（也支持
+  `Authorization: Bearer xxx`）；未配置时保持开放，便于测试环境直接使用
 
 ---
 
@@ -181,8 +211,8 @@ mvn -pl org.jacoco.agent,org.jacoco.agent.rt -am package -DskipTests
 unzip -p org.jacoco.agent/target/classes/jacocoagent.jar META-INF/MANIFEST.MF | grep -i premain
 #   → Premain-Class: org.jacoco.agent.rt.internal_xxxxxxxx.PreMain
 
-# 2) 四个定制类应存在（同样在重定位包名下）
-unzip -l org.jacoco.agent/target/classes/jacocoagent.jar | grep -E "AgentEnhancer|DeclaredFieldsRewriter|JarDownloadServer|SimpleHttpUtil"
+# 2) 定制类应位于重定位包的 custom/ 子目录下
+unzip -l org.jacoco.agent/target/classes/jacocoagent.jar | grep "internal_.*/custom/"
 ```
 
 **使用**：
@@ -213,11 +243,15 @@ mvn -pl org.jacoco.agent -am install -DskipTests
 
 ## 9. 升级 JaCoCo 源码步骤（本次重构的核心目标）
 
-1. **覆盖上游文件**：`org.jacoco.core`、`org.jacoco.core.test`、`org.jacoco.agent.rt` 的
+1. **拷贝定制目录**：把 `org.jacoco.agent.rt/src/.../internal/custom/` 和
+   对应测试目录整体拷入新版源码；该目录之外的文件均视为官方文件；
+2. **覆盖上游文件**：`org.jacoco.core`、`org.jacoco.core.test`、`org.jacoco.agent.rt` 的
    原文件（除 PreMain 外）均为官方原样，直接取新版源码替换，零冲突；
-2. **PreMain 接线**（唯一手工步骤）：在新版 `PreMain.premain` 中按官方流程插回：
+3. **PreMain 接线**（唯一手工步骤）：在新版 `PreMain.premain` 中补回 import 与钩子：
 
 ```java
+import org.jacoco.agent.rt.internal.custom.AgentEnhancer;
+
 final AgentOptions agentOptions = new AgentOptions(options);
 AgentEnhancer.beforeStartup(agentOptions);      // 端口探测与上报（getInstance 之前）
 final Agent agent = Agent.getInstance(agentOptions);
@@ -225,12 +259,12 @@ final Agent agent = Agent.getInstance(agentOptions);
 AgentEnhancer.afterStartup(agentOptions, inst); // 下载服务 + 改写器（插桩器之后注册）
 ```
 
-3. **保留构建配置**：`org.jacoco.agent.rt/pom.xml` 的
+4. **保留构建配置**：`org.jacoco.agent.rt/pom.xml` 的
    `maven-compiler-plugin <source>8</source><target>8</target>`（保证 agent 产物 Java 8 字节码，
    在老 BES 环境可运行）；
-4. **门户同步**：门户 `AppManageServiceImpl.agent()` 的 action 分支
-   （`reportDumpPort` / `reportHttpPort`）；
-5. **回归**：跑第 8 节命令 + 真机启动验证日志。
+5. **门户同步**：门户 `AppManageServiceImpl.agent()` 的 action 分支
+   （`reportDumpPort` / `reportHttpPort` / `reportJarPath`）；
+6. **回归**：跑第 8 节命令 + 真机启动验证日志。
 
 ---
 
@@ -239,7 +273,8 @@ AgentEnhancer.afterStartup(agentOptions, inst); // 下载服务 + 改写器（�
 | 项 | 现状 | 生产建议 |
 |---|---|---|
 | 下载路径 | 任意路径（仅限 `.jar/.war`） | 加白名单校验 |
-| multipart body | 全量读入内存、无大小上限 | `Content-Length > 4KB` 直接 400（见第 5 节） |
+| 鉴权 | 可选 token（`JACOCO_AGENT_TOKEN` / `-Djacoco.httpToken`），未配置时开放 | 生产必须配置 token |
+| 请求方法 | 已移除 POST/multipart，仅支持 GET（不再有 body 内存风险） | — |
 | 端口竞态 | 探测与绑定间毫秒级窗口（BES 高频重启极小概率） | 观察即可，必要时在 TcpServerOutput 侧做第二次兜底 |
 | 上传/注册 | 已删除（注册由门户 kafka 接管；上传无调用方且无门户对端） | — |
 
@@ -252,7 +287,7 @@ AgentEnhancer.afterStartup(agentOptions, inst); // 下载服务 + 改写器（�
 | 下载返回 400 `URISyntaxException` | 路径未做 URL 编码（中文路径/空格必踩）。命令行用 `curl -G --data-urlencode`，门户 Java 端已用 `URLEncoder.encode` |
 | 应用启动看不到 `[jacoco-download] 已启动` | 检查 App 日志是否 `APP_NAME/FOUNDERSC_ENV` 缺失（上报跳过），或下载端口 5 次冲突后放弃 |
 | 上报日志出现 `跳过` | `APP_NAME` / `FOUNDERSC_ENV` 环境变量未注入，门户侧不会出现该应用记录 |
-| 门户记录的端口和 agent 实际端口不一致 | 以 agent 日志 `http 下载服务已启动: port=` 与 `上报最新端口(...)` 为准；`reportHttpPort` 上报覆盖 `agentPort+100` 推算值 |
+| 门户记录的端口和 agent 实际端口不一致 | 以 agent 日志 `http 下载服务已启动: port=` 与 `上报(...)` 为准；`reportHttpPort` 上报覆盖 `agentPort+100` 推算值 |
 
 ---
 

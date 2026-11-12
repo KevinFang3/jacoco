@@ -10,17 +10,23 @@
  *    Marc R. Hoffmann - initial API and implementation
  *
  *******************************************************************************/
-package org.jacoco.agent.rt.internal;
+package org.jacoco.agent.rt.internal.custom;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.StringJoiner;
 
 /**
@@ -62,12 +68,84 @@ public class SimpleHttpUtil {
 		if (isMissing(appName) || isMissing(envValue)) {
 			return null;
 		}
-		final Map<String, String> bodyMap = new HashMap<>();
+		final Map<String, String> fields = new HashMap<String, String>();
+		fields.put(portField, portValue);
+		return buildReportBody(action, appName, envValue, fields);
+	}
+
+	/**
+	 * 组装上报 body（通用版）。
+	 * <p>
+	 * 身份信息为 {@code appName+env} 或 {@code ip} 至少一组：APP_NAME/FOUNDERSC_ENV
+	 * 与库中记录不一致或缺失时，门户仍可按 agent 自身 IP 匹配应用。
+	 *
+	 * @param action
+	 *            上报动作
+	 * @param appName
+	 *            应用名（可为空）
+	 * @param envValue
+	 *            环境（可为空，发送时统一小写）
+	 * @param fields
+	 *            附加字段（jarPath / ip / 端口字段等）
+	 * @return 组装好的 body；无任何身份信息时返回 null
+	 */
+	static Map<String, String> buildReportBody(final String action,
+			final String appName, final String envValue,
+			final Map<String, String> fields) {
+		final Map<String, String> bodyMap = new HashMap<String, String>();
 		bodyMap.put("action", action);
-		bodyMap.put("appName", appName);
-		bodyMap.put("env", envValue.toLowerCase());
-		bodyMap.put(portField, portValue);
-		return bodyMap;
+		if (!isMissing(appName)) {
+			bodyMap.put("appName", appName);
+		}
+		if (!isMissing(envValue)) {
+			bodyMap.put("env", envValue.toLowerCase());
+		}
+		if (fields != null) {
+			for (final Map.Entry<String, String> entry : fields.entrySet()) {
+				if (!isMissing(entry.getValue())) {
+					bodyMap.put(entry.getKey(), entry.getValue());
+				}
+			}
+		}
+		final boolean hasName = !isMissing(appName) && !isMissing(envValue);
+		final boolean hasIp = !isMissing(bodyMap.get("ip"));
+		return hasName || hasIp ? bodyMap : null;
+	}
+
+	/**
+	 * 本机可用 IPv4 地址（逗号分隔）。k8s 场景即 pod IP，门户优先按它匹配 deploy_ip。
+	 */
+	static String localIps() {
+		final Set<String> ips = new LinkedHashSet<String>();
+		try {
+			final Enumeration<NetworkInterface> nics = NetworkInterface
+					.getNetworkInterfaces();
+			if (nics != null) {
+				while (nics.hasMoreElements()) {
+					final NetworkInterface nic = nics.nextElement();
+					if (!nic.isUp() || nic.isLoopback()) {
+						continue;
+					}
+					final Enumeration<InetAddress> addrs = nic
+							.getInetAddresses();
+					while (addrs.hasMoreElements()) {
+						final InetAddress addr = addrs.nextElement();
+						if (addr instanceof Inet4Address
+								&& !addr.isLoopbackAddress()
+								&& !addr.isLinkLocalAddress()) {
+							ips.add(addr.getHostAddress());
+						}
+					}
+				}
+			}
+		} catch (final Exception e) {
+			System.out.println("[jacoco] 获取本机 IP 失败: " + e);
+		}
+		final StringJoiner joiner = new StringJoiner(",");
+		for (final String ip : ips) {
+			joiner.add(ip);
+		}
+		return joiner.toString();
 	}
 
 	/**
@@ -83,16 +161,37 @@ public class SimpleHttpUtil {
 	 */
 	public static void asyncReportPort(final String action,
 			final String portField, final String portValue) {
+		final Map<String, String> fields = new HashMap<String, String>();
+		fields.put(portField, portValue);
+		fields.put("ip", localIps());
+		asyncReport(action, fields, portValue);
+	}
+
+	/**
+	 * 应用本体 jar 路径上报（agent 自动识别，尽力而为）。
+	 *
+	 * @param jarPath
+	 *            本体 jar 绝对路径
+	 */
+	public static void asyncReportJarPath(final String jarPath) {
+		final Map<String, String> fields = new HashMap<String, String>();
+		fields.put("jarPath", jarPath);
+		fields.put("ip", localIps());
+		asyncReport("reportJarPath", fields, jarPath);
+	}
+
+	private static void asyncReport(final String action,
+			final Map<String, String> fields, final String logValue) {
 		final String appName = System.getenv("APP_NAME");
 		final String envValue = System.getenv("FOUNDERSC_ENV");
 		final Map<String, String> bodyMap = buildReportBody(action, appName,
-				envValue, portField, portValue);
+				envValue, fields);
 		if (bodyMap == null) {
-			System.out.println("[jacoco-" + action + "] 上报最新端口(" + portValue
-					+ ")跳过: APP_NAME/FOUNDERSC_ENV 未设置");
+			System.out.println("[jacoco-" + action + "] 上报(" + logValue
+					+ ")跳过: APP_NAME/FOUNDERSC_ENV/IP 均未获取到");
 			return;
 		}
-		asyncPost(baseUrl(), bodyMap, action, portValue);
+		asyncPost(baseUrl(), bodyMap, action, logValue);
 	}
 
 	private static boolean isMissing(final String value) {
@@ -106,10 +205,46 @@ public class SimpleHttpUtil {
 		StringJoiner joiner = new StringJoiner(",", "{", "}");
 		for (Map.Entry<String, String> entry : map.entrySet()) {
 			final String value = entry.getValue();
-			joiner.add("\"" + entry.getKey() + "\":"
-					+ (value == null ? "null" : "\"" + value + "\""));
+			joiner.add(escapeJson(entry.getKey()) + ":"
+					+ (value == null ? "null" : escapeJson(value)));
 		}
 		return joiner.toString();
+	}
+
+	/** JSON 字符串转义（含首尾引号）。 */
+	static String escapeJson(final String value) {
+		if (value == null) {
+			return "null";
+		}
+		final StringBuilder escaped = new StringBuilder(value.length() + 2);
+		escaped.append('"');
+		for (int i = 0; i < value.length(); i++) {
+			final char c = value.charAt(i);
+			switch (c) {
+			case '"':
+				escaped.append("\\\"");
+				break;
+			case '\\':
+				escaped.append("\\\\");
+				break;
+			case '\n':
+				escaped.append("\\n");
+				break;
+			case '\r':
+				escaped.append("\\r");
+				break;
+			case '\t':
+				escaped.append("\\t");
+				break;
+			default:
+				if (c < 0x20) {
+					escaped.append(String.format("\\u%04x", (int) c));
+				} else {
+					escaped.append(c);
+				}
+			}
+		}
+		return escaped.append('"').toString();
 	}
 
 	public static String post(String urlString, Map<String, String> bodyMap,
@@ -122,6 +257,8 @@ public class SimpleHttpUtil {
 				"application/json; charset=utf-8");
 		connection.setRequestProperty("User-Agent", "Java/HttpURLConnection");
 		connection.setConnectTimeout(3000);
+		// 门户若接受连接但不响应，避免上报线程无限阻塞
+		connection.setReadTimeout(3000);
 		connection.setDoOutput(true);
 		// 发起请求
 		String bodyString = mapToJson(bodyMap);
@@ -139,12 +276,12 @@ public class SimpleHttpUtil {
 				while ((responseLine = br.readLine()) != null) {
 					response.append(responseLine.trim());
 				}
-				System.out.println("[jacoco-" + action + "] 上报最新端口(" + portValue
+				System.out.println("[jacoco-" + action + "] 上报(" + portValue
 						+ ")成功: " + response);
 				return response.toString();
 			}
 		} else {
-			System.out.println("[jacoco-" + action + "] 上报最新端口(" + portValue
+			System.out.println("[jacoco-" + action + "] 上报(" + portValue
 					+ ")失败: " + connection.getResponseMessage());
 			return null;
 		}
@@ -156,7 +293,7 @@ public class SimpleHttpUtil {
 			try {
 				post(urlString, bodyMap, action, portValue);
 			} catch (IOException e) {
-				System.out.println("[jacoco-" + action + "] 上报最新端口(" + portValue
+				System.out.println("[jacoco-" + action + "] 上报(" + portValue
 						+ ")失败: " + e);
 			}
 		});

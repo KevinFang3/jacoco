@@ -10,10 +10,11 @@
  *    kevin - 门户端集成（端口冲突处理、jar 下载、$jacocoData 屏蔽）
  *
  *******************************************************************************/
-package org.jacoco.agent.rt.internal;
+package org.jacoco.agent.rt.internal.custom;
 
 import java.io.IOException;
 import java.lang.instrument.Instrumentation;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.util.HashMap;
 import java.util.Map;
@@ -68,7 +69,32 @@ public final class AgentEnhancer {
 		} catch (Exception e) {
 			System.out.println("[jacoco-download] 启动失败: " + e);
 		}
-		inst.addTransformer(new DeclaredFieldsRewriter());
+		// 自动识别本体 jar（java -jar）并上报，门户据此配置 jar_path，无需人工填写
+		try {
+			final String ownJar = ApplicationJarResolver.resolve();
+			if (ownJar != null) {
+				System.out
+						.println("[jacoco-reportJarPath] 识别到本体 jar: " + ownJar);
+				SimpleHttpUtil.asyncReportJarPath(ownJar);
+			} else {
+				System.out.println(
+						"[jacoco-reportJarPath] 未能识别本体 jar（非 java -jar 启动），跳过");
+			}
+		} catch (Exception e) {
+			System.out.println("[jacoco-reportJarPath] 上报失败: " + e);
+		}
+		// 保存 Instrumentation，供下载服务按需扫描已加载类、定位 WAR/解压目录
+		try {
+			WebappArtifactResolver.init(inst);
+		} catch (Exception e) {
+			System.out.println("[jacoco-download] 初始化 WAR 识别失败: " + e);
+		}
+		try {
+			inst.addTransformer(new DeclaredFieldsRewriter());
+		} catch (Exception e) {
+			// 注册失败不得影响业务启动
+			System.out.println("[jacoco-enhancer] 注册 $jacocoData 改写器失败: " + e);
+		}
 	}
 
 	/**
@@ -81,8 +107,10 @@ public final class AgentEnhancer {
 	 */
 	public static boolean adjustPortOnConflict(final AgentOptions options) {
 		// 探测失败（端口越界/无权限等）视为未冲突：交由 TcpServerOutput 原逻辑处理
-		try (ServerSocket socket = new ServerSocket(options.getPort())) {
+		try (ServerSocket socket = new ServerSocket()) {
+			// reuseAddress 必须在 bind 之前设置才生效
 			socket.setReuseAddress(true);
+			socket.bind(new InetSocketAddress(options.getPort()));
 		} catch (IOException e) {
 			options.setPort(options.getPort() + 1);
 			return true;

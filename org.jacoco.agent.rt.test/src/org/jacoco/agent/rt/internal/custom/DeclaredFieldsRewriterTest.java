@@ -10,7 +10,7 @@
  *    kevin - $jacocoData 反射屏蔽后处理改写测试
  *
  *******************************************************************************/
-package org.jacoco.agent.rt.internal;
+package org.jacoco.agent.rt.internal.custom;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;

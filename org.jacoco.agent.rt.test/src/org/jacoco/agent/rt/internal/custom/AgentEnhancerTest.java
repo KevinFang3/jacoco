@@ -10,7 +10,7 @@
  *    kevin - 端口冲突处理（宝兰德BES）单元测试
  *
  *******************************************************************************/
-package org.jacoco.agent.rt.internal;
+package org.jacoco.agent.rt.internal.custom;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;

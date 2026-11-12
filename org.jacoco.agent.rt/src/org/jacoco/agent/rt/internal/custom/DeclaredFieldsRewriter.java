@@ -10,13 +10,17 @@
  *    kevin - 屏蔽反射感知到的 jacoco 插桩字段（$jacocoData）
  *
  *******************************************************************************/
-package org.jacoco.agent.rt.internal;
+package org.jacoco.agent.rt.internal.custom;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.security.ProtectionDomain;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import org.jacoco.core.internal.instr.InstrSupport;
 import org.objectweb.asm.ClassReader;
@@ -51,6 +55,14 @@ public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 
 	private static final String DESC = "()[Ljava/lang/reflect/Field;";
 
+	/** 常量池快速预检用：字节码中不出现该方法名则无需 ASM 解析 */
+	private static final byte[] METHOD_NAME_BYTES = NAME
+			.getBytes(StandardCharsets.US_ASCII);
+
+	/** 加载器可见性缓存（弱引用 key，避免类加载器泄漏） */
+	private static final Map<ClassLoader, Boolean> VISIBILITY_CACHE = Collections
+			.synchronizedMap(new WeakHashMap<ClassLoader, Boolean>());
+
 	@Override
 	public byte[] transform(final ClassLoader loader, final String className,
 			final Class<?> classBeingRedefined,
@@ -62,6 +74,10 @@ public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 		// 与 jacoco 插桩器 CoverageTransformer#filter 一致地跳过 bootstrap 类
 		// （inclbootstrapclasses 默认关闭）；隔离类加载器同理跳过
 		if (loader == null || !isRuntimeVisibleTo(loader)) {
+			return null;
+		}
+		// 常量池里没有该方法名时直接跳过，避免对每个类都做 ASM 解析
+		if (!containsMethodName(classfileBuffer)) {
 			return null;
 		}
 		try {
@@ -115,13 +131,44 @@ public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 	 * @return runtime 类对目标加载器可见时返回 <code>true</code>
 	 */
 	private static boolean isRuntimeVisibleTo(final ClassLoader loader) {
+		final Boolean cached = VISIBILITY_CACHE.get(loader);
+		if (cached != null) {
+			return cached.booleanValue();
+		}
+		boolean visible;
 		try {
 			Class.forName(DeclaredFieldsRewriter.class.getName(), false,
 					loader);
-			return true;
+			visible = true;
 		} catch (ClassNotFoundException | LinkageError e) {
+			visible = false;
+		}
+		VISIBILITY_CACHE.put(loader, Boolean.valueOf(visible));
+		return visible;
+	}
+
+	/** 在字节码中做一次廉价的 ASCII 子串查找（方法名出现在常量池中）。 */
+	private static boolean containsMethodName(final byte[] data) {
+		if (data == null || data.length < METHOD_NAME_BYTES.length) {
 			return false;
 		}
+		final int last = data.length - METHOD_NAME_BYTES.length;
+		for (int i = 0; i <= last; i++) {
+			if (data[i] != METHOD_NAME_BYTES[0]) {
+				continue;
+			}
+			boolean match = true;
+			for (int j = 1; j < METHOD_NAME_BYTES.length; j++) {
+				if (data[i + j] != METHOD_NAME_BYTES[j]) {
+					match = false;
+					break;
+				}
+			}
+			if (match) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

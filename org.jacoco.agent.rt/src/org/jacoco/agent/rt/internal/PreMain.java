@@ -14,6 +14,7 @@ package org.jacoco.agent.rt.internal;
 
 import java.lang.instrument.Instrumentation;
 
+import org.jacoco.agent.rt.internal.custom.AgentEnhancer;
 import org.jacoco.core.runtime.AgentOptions;
 import org.jacoco.core.runtime.IRuntime;
 import org.jacoco.core.runtime.InjectedClassRuntime;
