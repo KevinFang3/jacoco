@@ -3,12 +3,9 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - WAR / 解压目录自动识别测试
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
@@ -21,6 +18,8 @@ import static org.junit.Assert.assertTrue;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
@@ -47,8 +46,8 @@ public class WebappArtifactResolverTest {
 		return dir;
 	}
 
-	private File newWar(final String name) throws Exception {
-		final File war = new File(ensureDir("webapps"), name);
+	private File newWar() throws Exception {
+		final File war = new File(ensureDir("webapps"), "app.war");
 		assertTrue(war.createNewFile());
 		return war;
 	}
@@ -60,13 +59,13 @@ public class WebappArtifactResolverTest {
 
 	@Test
 	public void testResolvePackedWarFromCodeSource() throws Exception {
-		final File war = newWar("app.war");
+		final File war = newWar();
 		final String url = "jar:" + war.toURI().toURL().toExternalForm()
 				+ "!/WEB-INF/classes/com/Foo.class";
 
 		final WebappArtifactResolver.Artifact artifact = WebappArtifactResolver
 				.resolve(Collections.singletonList(url), "app",
-						Collections.<File> emptyList());
+						Collections.emptyList());
 
 		assertNotNull(artifact);
 		assertEquals(WebappArtifactResolver.Kind.WAR, artifact.getKind());
@@ -81,7 +80,7 @@ public class WebappArtifactResolverTest {
 
 		final WebappArtifactResolver.Artifact artifact = WebappArtifactResolver
 				.resolve(Collections.singletonList(url), "app",
-						Collections.<File> emptyList());
+						Collections.emptyList());
 
 		assertNotNull(artifact);
 		assertEquals(WebappArtifactResolver.Kind.WEBAPP_DIR,
@@ -92,13 +91,13 @@ public class WebappArtifactResolverTest {
 	@Test
 	public void testPrefersSiblingWarOverExplodedDir() throws Exception {
 		final File webapp = webappDir("app");
-		final File war = newWar("app.war");
+		final File war = newWar();
 		final String url = new File(webapp, "WEB-INF/classes").toURI().toURL()
 				.toExternalForm();
 
 		final WebappArtifactResolver.Artifact artifact = WebappArtifactResolver
 				.resolve(Collections.singletonList(url), "app",
-						Collections.<File> emptyList());
+						Collections.emptyList());
 
 		assertNotNull(artifact);
 		assertEquals(WebappArtifactResolver.Kind.WAR, artifact.getKind());
@@ -115,7 +114,7 @@ public class WebappArtifactResolverTest {
 
 		final WebappArtifactResolver.Artifact artifact = WebappArtifactResolver
 				.resolve(Collections.singletonList(url), "app",
-						Collections.<File> emptyList());
+						Collections.emptyList());
 
 		assertNotNull(artifact);
 		assertEquals(WebappArtifactResolver.Kind.WEBAPP_DIR,
@@ -134,8 +133,7 @@ public class WebappArtifactResolverTest {
 						.toExternalForm());
 
 		final WebappArtifactResolver.Artifact artifact = WebappArtifactResolver
-				.resolve(locations, "group_app-two",
-						Collections.<File> emptyList());
+				.resolve(locations, "group_app-two", Collections.emptyList());
 
 		assertNotNull(artifact);
 		assertEquals(second.getCanonicalPath(), artifact.getPath().getPath());
@@ -152,7 +150,7 @@ public class WebappArtifactResolverTest {
 						.toExternalForm());
 
 		assertNull(WebappArtifactResolver.resolve(locations, "other-app",
-				Collections.<File> emptyList()));
+				Collections.emptyList()));
 	}
 
 	@Test
@@ -163,15 +161,15 @@ public class WebappArtifactResolverTest {
 
 		assertNull(
 				WebappArtifactResolver.resolve(Collections.singletonList(url),
-						"app", Collections.<File> emptyList()));
+						"app", Collections.emptyList()));
 	}
 
 	@Test
 	public void testScanFallbackFindsWar() throws Exception {
-		final File war = newWar("app.war");
+		final File war = newWar();
 
 		final WebappArtifactResolver.Artifact artifact = WebappArtifactResolver
-				.resolve(Collections.<String> emptyList(), "app",
+				.resolve(Collections.emptyList(), "app",
 						Collections.singletonList(tmp.getRoot()));
 
 		assertNotNull(artifact);
@@ -184,7 +182,7 @@ public class WebappArtifactResolverTest {
 		final File webapp = webappDir("app");
 
 		final WebappArtifactResolver.Artifact artifact = WebappArtifactResolver
-				.resolve(Collections.<String> emptyList(), "app",
+				.resolve(Collections.emptyList(), "app",
 						Collections.singletonList(tmp.getRoot()));
 
 		assertNotNull(artifact);
@@ -220,10 +218,8 @@ public class WebappArtifactResolverTest {
 		try (ZipFile zf = new ZipFile(zipFile)) {
 			assertNotNull(zf.getEntry("WEB-INF/classes/com/Foo.class"));
 			assertNotNull(zf.getEntry("WEB-INF/lib/app-core.jar"));
-			final byte[] content = zf
-					.getInputStream(
-							zf.getEntry("WEB-INF/classes/com/Foo.class"))
-					.readAllBytes();
+			final byte[] content = readAll(zf.getInputStream(
+					zf.getEntry("WEB-INF/classes/com/Foo.class")));
 			assertEquals("CLASS", new String(content, StandardCharsets.UTF_8));
 			assertEquals(ZipEntry.STORED,
 					zf.getEntry("WEB-INF/lib/app-core.jar").getMethod());
@@ -272,5 +268,15 @@ public class WebappArtifactResolverTest {
 		} finally {
 			WebappArtifactResolver.resetCache();
 		}
+	}
+
+	private static byte[] readAll(final InputStream in) throws IOException {
+		final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+		final byte[] chunk = new byte[4096];
+		int n;
+		while ((n = in.read(chunk)) != -1) {
+			buffer.write(chunk, 0, n);
+		}
+		return buffer.toByteArray();
 	}
 }

@@ -3,12 +3,9 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - 门户端集成（端口冲突处理、jar 下载、$jacocoData 屏蔽）
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
@@ -22,12 +19,13 @@ import java.util.Map;
 import org.jacoco.core.runtime.AgentOptions;
 
 /**
- * 门户端集成的生命周期增强钩子，由 {@link PreMain} 在 premain 流程两端调用。
+ * 门户端集成的生命周期增强钩子，由 {@link org.jacoco.agent.rt.internal.PreMain} 在 premain
+ * 流程两端调用。
  * <p>
  * 定制逻辑全部集中在本类（以及 {@link JarDownloadServer}、
  * {@link SimpleHttpUtil}、{@link DeclaredFieldsRewriter}），不修改
- * org.jacoco.core；{@link PreMain} 仅保留两行接线调用，升级原版 jacoco 时 该两行需按新版 premain
- * 流程重新插回。
+ * org.jacoco.core；{@link org.jacoco.agent.rt.internal.PreMain} 仅保留两行接线调用，升级原版
+ * jacoco 时 该两行需按新版 premain 流程重新插回。
  */
 public final class AgentEnhancer {
 
@@ -45,9 +43,9 @@ public final class AgentEnhancer {
 	public static void beforeStartup(final AgentOptions options) {
 		// 尽力而为：任何增强逻辑失败都不得影响 agent/业务启动（premain 抛异常 = 进程终止）
 		try {
-			if (adjustPortOnConflict(options)) {
-				reportDumpPort(options);
-			}
+			// 无论是否发生端口冲突，都上报实际 dump 端口，避免库中 agent_port 停留在旧值
+			adjustPortOnConflict(options);
+			reportDumpPort(options);
 		} catch (Exception e) {
 			System.out.println("[jacoco-enhancer] beforeStartup 失败: " + e);
 		}

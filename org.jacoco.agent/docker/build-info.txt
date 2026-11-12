@@ -1,0 +1,6 @@
+date=2026-11-12T18:13:15+0800
+git_commit=1d23e9f
+jar_sha256=ba13d5edee267a1ad36b772804441cc36f42a846ed4376b90c48f3811581c26f
+image=harbor.fzzqft.com/qa/jacocoagent:latest
+image_digest=sha256:4a22c2d7f2a0d28d53d098e95a396146621987514c68446b9e2435525f1b682d
+platforms=linux/amd64,linux/arm64

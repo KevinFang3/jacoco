@@ -3,12 +3,9 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - HTTP 接口仅保留 GET 的行为测试
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
@@ -99,7 +96,7 @@ public class JarDownloadServerHttpTest {
 
 	private static boolean isFree(final int port) {
 		try (ServerSocket socket = new ServerSocket(port)) {
-			return true;
+			return socket.getLocalPort() == port;
 		} catch (final IOException e) {
 			return false;
 		}
@@ -150,11 +147,10 @@ public class JarDownloadServerHttpTest {
 		return new String(buffer.toByteArray(), StandardCharsets.UTF_8);
 	}
 
-	private static String multipart(final String field, final String value) {
+	private static String multipart(final String value) {
 		return "--" + MULTIPART_BOUNDARY + "\r\n"
-				+ "Content-Disposition: form-data; name=\"" + field
-				+ "\"\r\n\r\n" + value + "\r\n--" + MULTIPART_BOUNDARY
-				+ "--\r\n";
+				+ "Content-Disposition: form-data; name=\"path\"" + "\r\n\r\n"
+				+ value + "\r\n--" + MULTIPART_BOUNDARY + "--\r\n";
 	}
 
 	private static String multipartContentType() {
@@ -178,8 +174,7 @@ public class JarDownloadServerHttpTest {
 		final StringBuilder body = new StringBuilder();
 
 		final int code = request("POST", "/download",
-				multipart("path", jar.getAbsolutePath()),
-				multipartContentType(), body);
+				multipart(jar.getAbsolutePath()), multipartContentType(), body);
 
 		assertEquals(400, code);
 		assertTrue(body.toString().contains("not allowed")
@@ -239,7 +234,7 @@ public class JarDownloadServerHttpTest {
 		final StringBuilder body = new StringBuilder();
 
 		final int code = request("POST", "/browse",
-				multipart("path", tmp.getRoot().getAbsolutePath()),
+				multipart(tmp.getRoot().getAbsolutePath()),
 				multipartContentType(), body);
 
 		assertEquals(400, code);

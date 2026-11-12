@@ -3,12 +3,9 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - WAR / 解压目录自动识别
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
@@ -106,7 +103,8 @@ public final class WebappArtifactResolver {
 		if (cached != null) {
 			return cached;
 		}
-		return resolveWithCache(System.currentTimeMillis(), () -> doResolve());
+		return resolveWithCache(System.currentTimeMillis(),
+				WebappArtifactResolver::doResolve);
 	}
 
 	/**
@@ -145,7 +143,7 @@ public final class WebappArtifactResolver {
 	}
 
 	private static Artifact doResolve() {
-		final List<String> locations = new ArrayList<String>();
+		final List<String> locations = new ArrayList<>();
 		final Instrumentation inst = instrumentation;
 		if (inst != null) {
 			Class<?>[] loaded = null;
@@ -168,9 +166,9 @@ public final class WebappArtifactResolver {
 
 	static Artifact resolve(final List<String> locationUrls,
 			final String appName, final List<File> scanBases) {
-		final Map<String, Artifact> artifacts = new LinkedHashMap<String, Artifact>();
+		final Map<String, Artifact> artifacts = new LinkedHashMap<>();
 		if (locationUrls != null) {
-			final Set<String> roots = new LinkedHashSet<String>();
+			final Set<String> roots = new LinkedHashSet<>();
 			for (final String url : locationUrls) {
 				final String root = webappRoot(url);
 				if (root != null) {
@@ -349,7 +347,7 @@ public final class WebappArtifactResolver {
 	}
 
 	private static Map<String, Artifact> scan(final File base) {
-		final Map<String, Artifact> result = new LinkedHashMap<String, Artifact>();
+		final Map<String, Artifact> result = new LinkedHashMap<>();
 		try {
 			if (!base.isDirectory()) {
 				return result;
@@ -393,8 +391,7 @@ public final class WebappArtifactResolver {
 							candidate.length() - ".war".length());
 				}
 				final boolean hit = candidate.length() >= 3
-						&& (name.equals(candidate)
-								|| name.endsWith("_" + candidate)
+						&& (name.endsWith("_" + candidate)
 								|| name.contains(candidate));
 				if (hit) {
 					matched = artifact;
@@ -409,7 +406,7 @@ public final class WebappArtifactResolver {
 	}
 
 	private static List<File> scanBases() {
-		final Set<File> bases = new LinkedHashSet<File>();
+		final Set<File> bases = new LinkedHashSet<>();
 		final String[] props = { "catalina.base", "catalina.home", "user.dir" };
 		for (final String prop : props) {
 			final String value = System.getProperty(prop);
@@ -423,7 +420,7 @@ public final class WebappArtifactResolver {
 		for (final String path : common) {
 			bases.add(new File(path));
 		}
-		return new ArrayList<File>(bases);
+		return new ArrayList<>(bases);
 	}
 
 	/** 解析函数（便于测试缓存逻辑）。 */

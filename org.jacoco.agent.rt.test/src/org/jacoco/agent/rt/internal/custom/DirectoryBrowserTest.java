@@ -3,12 +3,9 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - 目录树浏览测试
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
@@ -34,10 +31,9 @@ public class DirectoryBrowserTest {
 	@Rule
 	public TemporaryFolder tmp = new TemporaryFolder();
 
-	private File dir(final String path) {
+	private void dir(final String path) {
 		final File dir = new File(tmp.getRoot(), path);
 		assertTrue(dir.isDirectory() || dir.mkdirs());
-		return dir;
 	}
 
 	private File file(final String path) throws Exception {
@@ -68,8 +64,8 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), null, null, null,
 				tmp.getRoot().getAbsolutePath());
-
 		assertNotNull(result);
+
 		assertEquals(DirectoryBrowser.DEFAULT_DEPTH, result.getDepth());
 		assertNotNull(entry(result, "a.txt"));
 		assertNotNull(entry(result, "L1"));
@@ -88,6 +84,7 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), 2, "jar,war", null,
 				tmp.getRoot().getAbsolutePath());
+		assertNotNull(result);
 
 		assertNotNull(entry(result, "a.jar"));
 		assertNotNull(entry(result, "c.war"));
@@ -101,6 +98,7 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), 99, null, null,
 				tmp.getRoot().getAbsolutePath());
+		assertNotNull(result);
 
 		assertEquals(DirectoryBrowser.MAX_DEPTH, result.getDepth());
 	}
@@ -110,6 +108,7 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), null, null, 9999,
 				tmp.getRoot().getAbsolutePath());
+		assertNotNull(result);
 
 		assertEquals(DirectoryBrowser.MAX_LIMIT, result.getLimit());
 	}
@@ -123,6 +122,7 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), 1, null, 3,
 				tmp.getRoot().getAbsolutePath());
+		assertNotNull(result);
 
 		assertEquals(3, result.getEntries().size());
 		assertTrue(result.isTruncated());
@@ -145,8 +145,8 @@ public class DirectoryBrowserTest {
 
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse("sub",
 				null, null, null, tmp.getRoot().getAbsolutePath());
-
 		assertNotNull(result);
+
 		assertEquals(new File(tmp.getRoot(), "sub").getCanonicalPath(),
 				result.getRoot());
 	}
@@ -162,6 +162,7 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), 3, null, null,
 				tmp.getRoot().getAbsolutePath());
+		assertNotNull(result);
 
 		final DirectoryBrowser.Entry linkEntry = entry(result, "link");
 		assertNotNull(linkEntry);
@@ -176,6 +177,7 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), 1, null, null,
 				tmp.getRoot().getAbsolutePath());
+		assertNotNull(result);
 
 		final String json = DirectoryBrowser.toJson(result);
 		assertTrue(json.contains("a\\\"b.jar"));
@@ -190,6 +192,7 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), 1, null, null,
 				tmp.getRoot().getAbsolutePath());
+		assertNotNull(result);
 
 		final DirectoryBrowser.Entry jarEntry = entry(result, "app.jar");
 		assertNotNull(jarEntry);
@@ -204,6 +207,7 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), null, null, null,
 				tmp.getRoot().getAbsolutePath());
+		assertNotNull(result);
 
 		assertEquals(DirectoryBrowser.DEFAULT_LIMIT, result.getLimit());
 	}
@@ -213,8 +217,8 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), 0, null, null,
 				tmp.getRoot().getAbsolutePath());
-
 		assertNotNull(result);
+
 		assertEquals(0, result.getEntries().size());
 	}
 
@@ -228,6 +232,7 @@ public class DirectoryBrowserTest {
 		final DirectoryBrowser.Result result = DirectoryBrowser.browse(
 				tmp.getRoot().getAbsolutePath(), 1, null, null,
 				tmp.getRoot().getAbsolutePath());
+		assertNotNull(result);
 
 		final List<DirectoryBrowser.Entry> entries = result.getEntries();
 		assertEquals("alpha", entries.get(0).getRelative());

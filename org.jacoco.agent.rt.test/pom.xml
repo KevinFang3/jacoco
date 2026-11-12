@@ -26,6 +26,9 @@
 
   <properties>
     <jacoco.includes>org.jacoco.agent.rt.*</jacoco.includes>
+    <!-- 显式锁定 Java 8，避免 IDE 按父 POM 默认的 1.5 解析测试代码 -->
+    <maven.compiler.source>8</maven.compiler.source>
+    <maven.compiler.target>8</maven.compiler.target>
   </properties>
 
   <dependencies>

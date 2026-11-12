@@ -3,17 +3,13 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - 屏蔽反射感知到的 jacoco 插桩字段（$jacocoData）
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
 import java.lang.instrument.ClassFileTransformer;
-import java.lang.instrument.IllegalClassFormatException;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.security.ProtectionDomain;
@@ -61,13 +57,13 @@ public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 
 	/** 加载器可见性缓存（弱引用 key，避免类加载器泄漏） */
 	private static final Map<ClassLoader, Boolean> VISIBILITY_CACHE = Collections
-			.synchronizedMap(new WeakHashMap<ClassLoader, Boolean>());
+			.synchronizedMap(new WeakHashMap<>());
 
 	@Override
 	public byte[] transform(final ClassLoader loader, final String className,
 			final Class<?> classBeingRedefined,
 			final ProtectionDomain protectionDomain,
-			final byte[] classfileBuffer) throws IllegalClassFormatException {
+			final byte[] classfileBuffer) {
 		if (className == null) {
 			return null;
 		}
@@ -133,7 +129,7 @@ public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 	private static boolean isRuntimeVisibleTo(final ClassLoader loader) {
 		final Boolean cached = VISIBILITY_CACHE.get(loader);
 		if (cached != null) {
-			return cached.booleanValue();
+			return cached;
 		}
 		boolean visible;
 		try {
@@ -143,7 +139,7 @@ public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 		} catch (ClassNotFoundException | LinkageError e) {
 			visible = false;
 		}
-		VISIBILITY_CACHE.put(loader, Boolean.valueOf(visible));
+		VISIBILITY_CACHE.put(loader, visible);
 		return visible;
 	}
 
@@ -180,8 +176,8 @@ public final class DeclaredFieldsRewriter implements ClassFileTransformer {
 	 */
 	public static Field[] getDeclaredFields(final Class<?> clazz) {
 		final Field[] fields = clazz.getDeclaredFields();
-		for (int i = 0; i < fields.length; i++) {
-			if (InstrSupport.DATAFIELD_NAME.equals(fields[i].getName())) {
+		for (final Field field : fields) {
+			if (InstrSupport.DATAFIELD_NAME.equals(field.getName())) {
 				return Arrays.stream(fields).filter(
 						f -> !f.getName().equals(InstrSupport.DATAFIELD_NAME))
 						.toArray(Field[]::new);

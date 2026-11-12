@@ -3,12 +3,9 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - 容器目录树浏览（只读、仅元数据）
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
@@ -23,8 +20,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -170,12 +165,12 @@ public final class DirectoryBrowser {
 		if (root == null) {
 			return null;
 		}
-		final int effectiveDepth = clamp(
-				depth == null ? DEFAULT_DEPTH : depth.intValue(), 0, MAX_DEPTH);
-		final int effectiveLimit = clamp(
-				limit == null ? DEFAULT_LIMIT : limit.intValue(), 1, MAX_LIMIT);
+		final int effectiveDepth = clamp(depth == null ? DEFAULT_DEPTH : depth,
+				0, MAX_DEPTH);
+		final int effectiveLimit = clamp(limit == null ? DEFAULT_LIMIT : limit,
+				1, MAX_LIMIT);
 		final Set<String> filters = parseFilters(filter);
-		final List<Entry> entries = new ArrayList<Entry>();
+		final List<Entry> entries = new ArrayList<>();
 		final boolean[] truncated = { false };
 		if (effectiveDepth > 0) {
 			walk(root, root, 1, effectiveDepth, filters, effectiveLimit,
@@ -246,17 +241,13 @@ public final class DirectoryBrowser {
 
 	/** 对已收集的条目排序：目录优先，其次按相对路径名称。 */
 	private static void sortEntries(final List<Entry> entries) {
-		Collections.sort(entries, new Comparator<Entry>() {
-			@Override
-			public int compare(final Entry left, final Entry right) {
-				final boolean leftDir = "dir".equals(left.getType());
-				final boolean rightDir = "dir".equals(right.getType());
-				if (leftDir != rightDir) {
-					return leftDir ? -1 : 1;
-				}
-				return left.getRelative()
-						.compareToIgnoreCase(right.getRelative());
+		entries.sort((left, right) -> {
+			final boolean leftDir = "dir".equals(left.getType());
+			final boolean rightDir = "dir".equals(right.getType());
+			if (leftDir != rightDir) {
+				return leftDir ? -1 : 1;
 			}
+			return left.getRelative().compareToIgnoreCase(right.getRelative());
 		});
 	}
 
@@ -280,7 +271,7 @@ public final class DirectoryBrowser {
 	}
 
 	private static Set<String> parseFilters(final String filter) {
-		final Set<String> filters = new LinkedHashSet<String>();
+		final Set<String> filters = new LinkedHashSet<>();
 		if (filter == null || filter.trim().isEmpty()) {
 			return filters;
 		}

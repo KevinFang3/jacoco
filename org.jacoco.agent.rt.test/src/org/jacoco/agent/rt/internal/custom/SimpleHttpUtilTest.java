@@ -3,20 +3,21 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - 端口上报 body 组装（缺失显性化、env 小写化）测试
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.Test;
@@ -31,6 +32,7 @@ public class SimpleHttpUtilTest {
 		final Map<String, String> body = SimpleHttpUtil.buildReportBody(
 				"reportDumpPort", "myApp", "PROD", "agentPort", "6301");
 
+		assertNotNull(body);
 		assertEquals("reportDumpPort", body.get("action"));
 		assertEquals("myApp", body.get("appName"));
 		assertEquals("prod", body.get("env"));
@@ -42,6 +44,7 @@ public class SimpleHttpUtilTest {
 		final Map<String, String> body = SimpleHttpUtil.buildReportBody(
 				"reportHttpPort", "myApp", "test", "httpPort", "6400");
 
+		assertNotNull(body);
 		assertEquals("6400", body.get("httpPort"));
 	}
 
@@ -61,13 +64,14 @@ public class SimpleHttpUtilTest {
 
 	@Test
 	public void testBuildReportBodyWithExtraFields() {
-		final Map<String, String> fields = new HashMap<String, String>();
+		final Map<String, String> fields = new HashMap<>();
 		fields.put("jarPath", "/opt/app/lib/app.jar");
 		fields.put("ip", "100.116.57.175");
 
 		final Map<String, String> body = SimpleHttpUtil
 				.buildReportBody("reportJarPath", "myApp", "QA", fields);
 
+		assertNotNull(body);
 		assertEquals("reportJarPath", body.get("action"));
 		assertEquals("myApp", body.get("appName"));
 		assertEquals("qa", body.get("env"));
@@ -77,12 +81,13 @@ public class SimpleHttpUtilTest {
 
 	@Test
 	public void testBuildReportBodyAllowsIpOnlyWhenNamesMissing() {
-		final Map<String, String> fields = new HashMap<String, String>();
+		final Map<String, String> fields = new HashMap<>();
 		fields.put("ip", "100.116.57.175");
 
 		final Map<String, String> body = SimpleHttpUtil
 				.buildReportBody("reportJarPath", null, null, fields);
 
+		assertNotNull(body);
 		assertEquals("100.116.57.175", body.get("ip"));
 		assertNull(body.get("appName"));
 		assertNull(body.get("env"));
@@ -91,12 +96,12 @@ public class SimpleHttpUtilTest {
 	@Test
 	public void testBuildReportBodyReturnsNullWithoutAnyIdentity() {
 		assertNull(SimpleHttpUtil.buildReportBody("reportJarPath", null, null,
-				new HashMap<String, String>()));
+				new HashMap<>()));
 	}
 
 	@Test
 	public void testMapToJsonEscapesSpecialChars() {
-		final Map<String, String> body = new HashMap<String, String>();
+		final Map<String, String> body = new HashMap<>();
 		body.put("jarPath", "/opt/a\"b\\c.jar");
 		body.put("ip", "1.2.3.4");
 
@@ -104,6 +109,51 @@ public class SimpleHttpUtilTest {
 
 		assertTrue(json.contains("a\\\"b\\\\c.jar"));
 		assertTrue(json.contains("\"ip\":\"1.2.3.4\""));
+	}
+
+	@Test
+	public void testIsBusinessSuccess() {
+		assertTrue(SimpleHttpUtil
+				.isBusinessSuccess("{\"code\":200,\"message\":\"ok\"}"));
+		assertTrue(SimpleHttpUtil.isBusinessSuccess("{\"code\": 200}"));
+		assertFalse(SimpleHttpUtil.isBusinessSuccess("{\"code\":500}"));
+		assertFalse(SimpleHttpUtil.isBusinessSuccess("{\"code\":5000}"));
+		assertFalse(SimpleHttpUtil.isBusinessSuccess(null));
+		assertFalse(SimpleHttpUtil.isBusinessSuccess(""));
+		assertFalse(SimpleHttpUtil.isBusinessSuccess("{\"message\":\"ok\"}"));
+	}
+
+	@Test
+	public void testReportWithRetrySucceedsAfterFailures() {
+		final int[] calls = { 0 };
+		final List<Long> sleeps = new ArrayList<>();
+
+		final boolean ok = SimpleHttpUtil.reportWithRetry("reportHttpPort",
+				new HashMap<>(), "6400", 10, 60000L, body -> {
+					calls[0]++;
+					return calls[0] >= 3 ? "{\"code\":200}" : "{\"code\":500}";
+				}, sleeps::add);
+
+		assertTrue(ok);
+		assertEquals(3, calls[0]);
+		assertEquals(2, sleeps.size());
+		assertEquals(Long.valueOf(60000L), sleeps.get(0));
+	}
+
+	@Test
+	public void testReportWithRetryGivesUpAfterMaxRetries() {
+		final int[] calls = { 0 };
+		final List<Long> sleeps = new ArrayList<>();
+
+		final boolean ok = SimpleHttpUtil.reportWithRetry("reportHttpPort",
+				new HashMap<>(), "6400", 10, 60000L, body -> {
+					calls[0]++;
+					return "{\"code\":500}";
+				}, sleeps::add);
+
+		assertFalse(ok);
+		assertEquals(11, calls[0]); // 首次 + 10 次重试
+		assertEquals(10, sleeps.size());
 	}
 
 }

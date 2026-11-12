@@ -3,12 +3,9 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - $jacocoData 反射屏蔽后处理改写测试
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
@@ -16,7 +13,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-import java.lang.instrument.IllegalClassFormatException;
 import java.lang.reflect.Field;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -37,24 +33,22 @@ import org.objectweb.asm.Opcodes;
 public class DeclaredFieldsRewriterTest {
 
 	@Test
-	public void testGetDeclaredFieldsCallIsRewritten()
-			throws IllegalClassFormatException {
+	public void testGetDeclaredFieldsCallIsRewritten() {
 		byte[] result = new DeclaredFieldsRewriter().transform(
 				getClass().getClassLoader(), "SampleBean", null, null,
 				sampleClassBytes("getDeclaredFields",
 						"()[Ljava/lang/reflect/Field;"));
 
 		assertEquals(Opcodes.INVOKESTATIC,
-				methodInsnInsns(result, "getDeclaredFields").get(0).opcode);
+				methodInsnInsns(result).get(0).opcode);
 		assertEquals(DeclaredFieldsRewriter.class.getName().replace('.', '/'),
-				methodInsnInsns(result, "getDeclaredFields").get(0).owner);
+				methodInsnInsns(result).get(0).owner);
 		assertEquals("(Ljava/lang/Class;)[Ljava/lang/reflect/Field;",
-				methodInsnInsns(result, "getDeclaredFields").get(0).descriptor);
+				methodInsnInsns(result).get(0).descriptor);
 	}
 
 	@Test
-	public void testOtherMethodInsnsAreNotRewritten()
-			throws IllegalClassFormatException {
+	public void testOtherMethodInsnsAreNotRewritten() {
 		byte[] result = new DeclaredFieldsRewriter().transform(
 				getClass().getClassLoader(), "SampleBean", null, null,
 				sampleClassBytes("getDeclaredField",
@@ -65,8 +59,7 @@ public class DeclaredFieldsRewriterTest {
 	}
 
 	@Test
-	public void testTransformReturnsNullWithoutRewrite()
-			throws IllegalClassFormatException {
+	public void testTransformReturnsNullWithoutRewrite() {
 		byte[] result = new DeclaredFieldsRewriter().transform(
 				getClass().getClassLoader(), "SampleBean", null, null,
 				plainClassBytes());
@@ -81,8 +74,8 @@ public class DeclaredFieldsRewriterTest {
 	 * （CoverageTransformer#filter，inclbootstrapclasses 默认关闭）保持一致。
 	 */
 	@Test
-	public void testBootstrapClassLoaderIsNotRewritten()
-			throws IllegalClassFormatException {
+	@SuppressWarnings("ConstantConditions")
+	public void testBootstrapClassLoaderIsNotRewritten() {
 		byte[] result = new DeclaredFieldsRewriter().transform(null,
 				"SampleBean", null, null, sampleClassBytes("getDeclaredFields",
 						"()[Ljava/lang/reflect/Field;"));
@@ -96,8 +89,7 @@ public class DeclaredFieldsRewriterTest {
 	 * instrumentation）。
 	 */
 	@Test
-	public void testIsolatedClassLoaderIsNotRewritten()
-			throws IllegalClassFormatException {
+	public void testIsolatedClassLoaderIsNotRewritten() {
 		final ClassLoader isolated = new URLClassLoader(new URL[0], null);
 		byte[] result = new DeclaredFieldsRewriter().transform(isolated,
 				"SampleBean", null, null, sampleClassBytes("getDeclaredFields",
@@ -114,17 +106,17 @@ public class DeclaredFieldsRewriterTest {
 		final Field[] fields = DeclaredFieldsRewriter
 				.getDeclaredFields(MockBean.class);
 		assertTrue(Arrays.stream(fields)
-				.allMatch(f -> !f.getName().equals("$jacocoData")));
+				.noneMatch(f -> "$jacocoData".equals(f.getName())));
 		assertTrue(Arrays.stream(fields)
-				.anyMatch(f -> f.getName().equals("regular")));
+				.anyMatch(f -> "regular".equals(f.getName())));
 	}
 
 	/**
 	 * 畸形字节码不得抛异常（改写失败不得破坏该类的加载）。
 	 */
 	@Test
-	public void testMalformedClassReturnsNull()
-			throws IllegalClassFormatException {
+	@SuppressWarnings("ConstantConditions")
+	public void testMalformedClassReturnsNull() {
 		byte[] result = new DeclaredFieldsRewriter().transform(null,
 				"SampleBean", null, null, new byte[] { 1, 2, 3 });
 
@@ -198,10 +190,9 @@ public class DeclaredFieldsRewriterTest {
 	}
 
 	/**
-	 * 读取结果字节码中名为 {@code name} 的调用点记录。
+	 * 读取结果字节码中 getDeclaredFields 的调用点记录。
 	 */
-	private static List<MethodInsn> methodInsnInsns(final byte[] bytes,
-			final String name) {
+	private static List<MethodInsn> methodInsnInsns(final byte[] bytes) {
 		final List<MethodInsn> insns = new ArrayList<>();
 		new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
 
@@ -224,7 +215,7 @@ public class DeclaredFieldsRewriterTest {
 		}, 0);
 		final List<MethodInsn> result = new ArrayList<>();
 		for (MethodInsn insn : insns) {
-			if (name.equals(insn.name)) {
+			if ("getDeclaredFields".equals(insn.name)) {
 				result.add(insn);
 			}
 		}

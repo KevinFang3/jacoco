@@ -3,12 +3,9 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    Marc R. Hoffmann - initial API and implementation
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
@@ -28,6 +25,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.regex.Pattern;
 
 /**
  * 门户口径的 HTTP 客户端工具：json 上报（reportDumpPort/reportHttpPort）， 尽力而为、异常不外传；上报线程为
@@ -40,6 +38,14 @@ import java.util.StringJoiner;
 public class SimpleHttpUtil {
 
 	private static final String BASE_URL = "http://qa.fzzqft.com/portaljava/codeCoverage";
+
+	/** 上报失败后的重试间隔：每 60 秒一次 */
+	static final long REPORT_RETRY_INTERVAL_MILLIS = 60000L;
+	/** 最大重试次数（不含首次上报） */
+	static final int REPORT_MAX_RETRIES = 10;
+	/** 门户业务成功码：HTTP 200 不代表业务成功，必须检查响应体 code */
+	private static final Pattern SUCCESS_CODE = Pattern
+			.compile("\"code\"\\s*:\\s*200\\b");
 
 	/** 门户口径的上报地址（JarDownloadServer 等复用） */
 	static String baseUrl() {
@@ -68,7 +74,7 @@ public class SimpleHttpUtil {
 		if (isMissing(appName) || isMissing(envValue)) {
 			return null;
 		}
-		final Map<String, String> fields = new HashMap<String, String>();
+		final Map<String, String> fields = new HashMap<>();
 		fields.put(portField, portValue);
 		return buildReportBody(action, appName, envValue, fields);
 	}
@@ -92,7 +98,7 @@ public class SimpleHttpUtil {
 	static Map<String, String> buildReportBody(final String action,
 			final String appName, final String envValue,
 			final Map<String, String> fields) {
-		final Map<String, String> bodyMap = new HashMap<String, String>();
+		final Map<String, String> bodyMap = new HashMap<>();
 		bodyMap.put("action", action);
 		if (!isMissing(appName)) {
 			bodyMap.put("appName", appName);
@@ -116,25 +122,22 @@ public class SimpleHttpUtil {
 	 * 本机可用 IPv4 地址（逗号分隔）。k8s 场景即 pod IP，门户优先按它匹配 deploy_ip。
 	 */
 	static String localIps() {
-		final Set<String> ips = new LinkedHashSet<String>();
+		final Set<String> ips = new LinkedHashSet<>();
 		try {
 			final Enumeration<NetworkInterface> nics = NetworkInterface
 					.getNetworkInterfaces();
-			if (nics != null) {
-				while (nics.hasMoreElements()) {
-					final NetworkInterface nic = nics.nextElement();
-					if (!nic.isUp() || nic.isLoopback()) {
-						continue;
-					}
-					final Enumeration<InetAddress> addrs = nic
-							.getInetAddresses();
-					while (addrs.hasMoreElements()) {
-						final InetAddress addr = addrs.nextElement();
-						if (addr instanceof Inet4Address
-								&& !addr.isLoopbackAddress()
-								&& !addr.isLinkLocalAddress()) {
-							ips.add(addr.getHostAddress());
-						}
+			while (nics.hasMoreElements()) {
+				final NetworkInterface nic = nics.nextElement();
+				if (!nic.isUp() || nic.isLoopback()) {
+					continue;
+				}
+				final Enumeration<InetAddress> addrs = nic.getInetAddresses();
+				while (addrs.hasMoreElements()) {
+					final InetAddress addr = addrs.nextElement();
+					if (addr instanceof Inet4Address
+							&& !addr.isLoopbackAddress()
+							&& !addr.isLinkLocalAddress()) {
+						ips.add(addr.getHostAddress());
 					}
 				}
 			}
@@ -161,7 +164,7 @@ public class SimpleHttpUtil {
 	 */
 	public static void asyncReportPort(final String action,
 			final String portField, final String portValue) {
-		final Map<String, String> fields = new HashMap<String, String>();
+		final Map<String, String> fields = new HashMap<>();
 		fields.put(portField, portValue);
 		fields.put("ip", localIps());
 		asyncReport(action, fields, portValue);
@@ -174,7 +177,7 @@ public class SimpleHttpUtil {
 	 *            本体 jar 绝对路径
 	 */
 	public static void asyncReportJarPath(final String jarPath) {
-		final Map<String, String> fields = new HashMap<String, String>();
+		final Map<String, String> fields = new HashMap<>();
 		fields.put("jarPath", jarPath);
 		fields.put("ip", localIps());
 		asyncReport("reportJarPath", fields, jarPath);
@@ -191,7 +194,74 @@ public class SimpleHttpUtil {
 					+ ")跳过: APP_NAME/FOUNDERSC_ENV/IP 均未获取到");
 			return;
 		}
-		asyncPost(baseUrl(), bodyMap, action, logValue);
+		final Thread thread = new Thread(
+				() -> reportWithRetry(action, bodyMap, logValue),
+				"jacoco-report-" + action);
+		thread.setDaemon(true);
+		thread.start();
+	}
+
+	/** 测试用：发送一次上报，返回响应体（失败返回 null 或抛异常）。 */
+	interface ReportPoster {
+		String post(Map<String, String> bodyMap) throws Exception;
+	}
+
+	/** 测试用：重试间隔休眠。 */
+	interface ReportSleeper {
+		void sleep(long millis) throws InterruptedException;
+	}
+
+	private static void reportWithRetry(final String action,
+			final Map<String, String> bodyMap, final String logValue) {
+		reportWithRetry(action, bodyMap, logValue, REPORT_MAX_RETRIES,
+				REPORT_RETRY_INTERVAL_MILLIS, body -> post(baseUrl(), body),
+				Thread::sleep);
+	}
+
+	/**
+	 * 上报并在失败时按固定间隔重试。判定成功以响应体中的 {@code "code":200} 为准（门户业务失败仍返回 HTTP 200）。
+	 *
+	 * @return 最终是否成功
+	 */
+	static boolean reportWithRetry(final String action,
+			final Map<String, String> bodyMap, final String logValue,
+			final int maxRetries, final long intervalMillis,
+			final ReportPoster poster, final ReportSleeper sleeper) {
+		for (int attempt = 0; attempt <= maxRetries; attempt++) {
+			String response;
+			try {
+				response = poster.post(bodyMap);
+			} catch (final Exception e) {
+				response = "网络异常: " + e;
+			}
+			if (isBusinessSuccess(response)) {
+				System.out.println("[jacoco-" + action + "] 上报(" + logValue
+						+ ")成功: " + response);
+				return true;
+			}
+			if (attempt == maxRetries) {
+				System.out.println("[jacoco-" + action + "] 上报(" + logValue
+						+ ")失败: 已重试 " + maxRetries + " 次，放弃: " + response);
+				return false;
+			}
+			final int next = attempt + 1;
+			System.out.println("[jacoco-" + action + "] 上报(" + logValue
+					+ ")失败: " + response + "，" + (intervalMillis / 1000)
+					+ "s 后重试（" + next + "/" + maxRetries + "）");
+			try {
+				sleeper.sleep(intervalMillis);
+			} catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return false;
+			}
+		}
+		return false;
+	}
+
+	/** 门户业务成功判定：响应体包含 {@code "code":200}。 */
+	static boolean isBusinessSuccess(final String responseBody) {
+		return responseBody != null
+				&& SUCCESS_CODE.matcher(responseBody).find();
 	}
 
 	private static boolean isMissing(final String value) {
@@ -247,11 +317,12 @@ public class SimpleHttpUtil {
 		return escaped.append('"').toString();
 	}
 
-	public static String post(String urlString, Map<String, String> bodyMap,
-			String action, String portValue) throws IOException {
+	static String post(final String urlString,
+			final Map<String, String> bodyMap) throws IOException {
 		// 构造请求
-		URL url = new URL(urlString);
-		HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+		final URL url = new URL(urlString);
+		final HttpURLConnection connection = (HttpURLConnection) url
+				.openConnection();
 		connection.setRequestMethod("POST");
 		connection.setRequestProperty("Content-Type",
 				"application/json; charset=utf-8");
@@ -261,44 +332,25 @@ public class SimpleHttpUtil {
 		connection.setReadTimeout(3000);
 		connection.setDoOutput(true);
 		// 发起请求
-		String bodyString = mapToJson(bodyMap);
+		final String bodyString = mapToJson(bodyMap);
 		try (OutputStream os = connection.getOutputStream()) {
-			byte[] input = bodyString.getBytes(StandardCharsets.UTF_8);
+			final byte[] input = bodyString.getBytes(StandardCharsets.UTF_8);
 			os.write(input, 0, input.length);
 		}
 		// 处理响应
-		int responseCode = connection.getResponseCode();
-		if (responseCode == HttpURLConnection.HTTP_OK) {
-			try (BufferedReader br = new BufferedReader(new InputStreamReader(
-					connection.getInputStream(), StandardCharsets.UTF_8))) {
-				StringBuilder response = new StringBuilder();
-				String responseLine;
-				while ((responseLine = br.readLine()) != null) {
-					response.append(responseLine.trim());
-				}
-				System.out.println("[jacoco-" + action + "] 上报(" + portValue
-						+ ")成功: " + response);
-				return response.toString();
-			}
-		} else {
-			System.out.println("[jacoco-" + action + "] 上报(" + portValue
-					+ ")失败: " + connection.getResponseMessage());
+		final int responseCode = connection.getResponseCode();
+		if (responseCode != HttpURLConnection.HTTP_OK) {
 			return null;
 		}
-	}
-
-	public static void asyncPost(String urlString, Map<String, String> bodyMap,
-			String action, String portValue) {
-		Thread t = new Thread(() -> {
-			try {
-				post(urlString, bodyMap, action, portValue);
-			} catch (IOException e) {
-				System.out.println("[jacoco-" + action + "] 上报(" + portValue
-						+ ")失败: " + e);
+		try (BufferedReader br = new BufferedReader(new InputStreamReader(
+				connection.getInputStream(), StandardCharsets.UTF_8))) {
+			final StringBuilder response = new StringBuilder();
+			String responseLine;
+			while ((responseLine = br.readLine()) != null) {
+				response.append(responseLine.trim());
 			}
-		});
-		t.setDaemon(true);
-		t.start();
+			return response.toString();
+		}
 	}
 
 }

@@ -3,12 +3,9 @@
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which is available at
  * http://www.eclipse.org/legal/epl-2.0
- *
  * SPDX-License-Identifier: EPL-2.0
- *
  * Contributors:
  *    kevin - 门户端发起下载 jar（HTTP, 代替原 czx 自定义 TCP 协议）
- *
  *******************************************************************************/
 package org.jacoco.agent.rt.internal.custom;
 
@@ -96,13 +93,12 @@ public class JarDownloadServer {
 			return;
 		}
 		httpServer.createContext("/download",
-				exchange -> handleDownload(exchange));
-		httpServer.createContext("/browse", exchange -> handleBrowse(exchange));
+				JarDownloadServer::handleDownload);
+		httpServer.createContext("/browse", JarDownloadServer::handleBrowse);
 		// 固定大小线程池 + 有界队列：避免无鉴权接口被并发请求拖垮业务 JVM。
 		// 队列满时 CallerRunsPolicy 在分发线程执行，形成天然背压。
 		final ThreadPoolExecutor executor = new ThreadPoolExecutor(4, 4, 0L,
-				TimeUnit.MILLISECONDS, new LinkedBlockingQueue<Runnable>(16),
-				r -> {
+				TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>(16), r -> {
 					Thread t = new Thread(r, "jacoco-download");
 					t.setDaemon(true);
 					return t;
@@ -151,7 +147,7 @@ public class JarDownloadServer {
 			throws IOException {
 		final long start = System.currentTimeMillis();
 		try {
-			if (!isAuthorized(exchange)) {
+			if (isUnauthorized(exchange)) {
 				System.out.println("[jacoco-download] 拒绝未授权请求: "
 						+ exchange.getRequestURI());
 				sendText(exchange, 401, "unauthorized");
@@ -268,7 +264,7 @@ public class JarDownloadServer {
 	private static void handleBrowse(final HttpExchange exchange)
 			throws IOException {
 		try {
-			if (!isAuthorized(exchange)) {
+			if (isUnauthorized(exchange)) {
 				sendText(exchange, 401, "unauthorized");
 				return;
 			}
@@ -313,10 +309,10 @@ public class JarDownloadServer {
 	 * {@code off} 时关闭。启用时要求请求头 {@code X-Agent-Token} （或
 	 * {@code Authorization: Bearer}）匹配。
 	 */
-	private static boolean isAuthorized(final HttpExchange exchange) {
+	private static boolean isUnauthorized(final HttpExchange exchange) {
 		final String expected = expectedToken();
 		if (expected.isEmpty()) {
-			return true;
+			return false;
 		}
 		String provided = exchange.getRequestHeaders().getFirst(TOKEN_HEADER);
 		if (provided == null) {
@@ -329,9 +325,9 @@ public class JarDownloadServer {
 			}
 		}
 		if (provided == null) {
-			return false;
+			return true;
 		}
-		return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
+		return !MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
 				provided.getBytes(StandardCharsets.UTF_8));
 	}
 
@@ -362,13 +358,13 @@ public class JarDownloadServer {
 		return TOKEN_OFF.equalsIgnoreCase(token) ? "" : token;
 	}
 
-	private static Map<String, String> browseParams(final HttpExchange exchange)
-			throws IOException {
+	private static Map<String, String> browseParams(
+			final HttpExchange exchange) {
 		final String method = exchange.getRequestMethod();
 		if (!"GET".equalsIgnoreCase(method)) {
 			throw new IllegalArgumentException("method not allowed: " + method);
 		}
-		final Map<String, String> decoded = new HashMap<String, String>();
+		final Map<String, String> decoded = new HashMap<>();
 		for (final Map.Entry<String, String> entry : parseQuery(exchange)
 				.entrySet()) {
 			decoded.put(entry.getKey(), urlDecode(entry.getValue()));
@@ -399,8 +395,7 @@ public class JarDownloadServer {
 		}
 	}
 
-	private static String requestPath(final HttpExchange exchange)
-			throws IOException {
+	private static String requestPath(final HttpExchange exchange) {
 		final String method = exchange.getRequestMethod();
 		if (!"GET".equalsIgnoreCase(method)) {
 			throw new IllegalArgumentException("method not allowed: " + method);

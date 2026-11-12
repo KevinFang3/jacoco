@@ -120,13 +120,18 @@ JVM 启动（-javaagent → premain）
   - `appName` 取 `APP_NAME` 环境变量，`env` 取 `FOUNDERSC_ENV` 并统一转小写
   - 多网卡时 `ip` 为逗号分隔列表
 - 所有字段值做 JSON 转义，避免路径中的引号/反斜杠破坏报文
-- 上报失败只打日志，不影响业务
+- **成功判定**：以响应体中的 `"code":200` 为准，而不是 HTTP 状态码
+  （门户业务失败时也返回 HTTP 200）
+- **失败重试**：失败后每 60 秒重试一次，最多 10 次（约 10 分钟窗口），成功即停止；
+  重试在 daemon 线程执行，不影响业务启动/退出
+- 之所以需要重试：`deploy_ip` 由 FONE/Kafka 异步更新，agent 启动时上报可能早于
+  数据库写入新 Pod IP，单次上报会失败
 
 ### 4.2 action 一览
 
 | action | 触发时机 | 主要字段 | 门户落库 |
 |---|---|---|---|
-| `reportDumpPort` | dump 端口被占 +1 后 | `appName / env / ip / agentPort` | `agent_port` |
+| `reportDumpPort` | 每次启动都上报（无论端口是否冲突） | `appName / env / ip / agentPort` | `agent_port` |
 | `reportHttpPort` | 下载服务启动成功后 | `appName / env / ip / httpPort` | `http_port`（`agentPort+100` 仅兜底） |
 | `reportJarPath` | `java -jar` 且识别到本体 jar | `appName / env / ip / jarPath` | `jar_path` |
 
@@ -298,6 +303,7 @@ docker run -e JACOCO_AGENT_TOKEN=your-token ...
 | 文件输出 | 8KB 缓冲流式输出，不整体载入内存 |
 | 产物落盘 | 先写 `<target>.part`，zip 校验通过后原子替换；失败自动清理，不留半成品 |
 | 自动识别 | 结果缓存 + 失败 10 秒退避 |
+| 上报重试 | 业务/网络失败后每 60 秒重试，最多 10 次（daemon 线程） |
 | 解压目录打包 | 流式 zip，jar 用 STORED，内存与文件大小无关 |
 | 日志 | `System.out`，daemon 上报线程 |
 
@@ -377,8 +383,9 @@ curl "http://<agent-ip>:<httpPort>/browse?path=/opt/app&depth=2&filter=jar,war"
 | 识别 | `[jacoco-reportJarPath] 未能识别本体 jar（非 java -jar 启动），跳过` | -cp / 目录部署 |
 | 识别 | `[jacoco-reportJarPath] 上报失败: {e}` | 上报异常 |
 | 上报 | `[jacoco-{action}] 上报({value})跳过: APP_NAME/FOUNDERSC_ENV/IP 均未获取到` | 无身份信息 |
-| 上报 | `[jacoco-{action}] 上报({value})成功: {响应}` | 门户 200 |
-| 上报 | `[jacoco-{action}] 上报({value})失败: {msg}` | 非 200 / 网络异常 |
+| 上报 | `[jacoco-{action}] 上报({value})成功: {响应}` | 响应体 `"code":200` |
+| 上报 | `[jacoco-{action}] 上报({value})失败: {响应}，60s 后重试（N/10）` | 业务/网络失败，等待重试 |
+| 上报 | `[jacoco-{action}] 上报({value})失败: 已重试 10 次，放弃: {响应}` | 重试耗尽 |
 | 下载 | `[jacoco-download] 拒绝未授权请求: {uri}` | token 不匹配 |
 | 下载 | `[jacoco-download] 下载失败: {msg}` | 400（方法/参数非法） |
 | 下载 | `[jacoco-download] 下载失败: not found or not allowed` | 404 |
@@ -470,6 +477,65 @@ mvn -pl org.jacoco.agent -am install -DskipTests
 > 构建下 `prepare-agent` 解析到 `target/classes` 会导致 fork VM 崩溃（非代码问题，
 > 全量 `mvn install` 后正常）。
 
+### 9.4 镜像构建与推送（Harbor）
+
+镜像固定为：
+
+```
+harbor.fzzqft.com/qa/jacocoagent:latest
+```
+
+- **不改名、不加版本 tag**：第三方按固定标签拉取；
+- **linux/amd64 + linux/arm64** 双架构；
+- 直接覆盖 `latest`（旧 digest 仍可按 digest 拉取）。
+
+相关文件（位于 `org.jacoco.agent/docker/`，在模块根目录、不在 `src` 下，
+不会被资源插件打进 agent jar）：
+
+| 文件 | 说明 |
+|---|---|
+| `org.jacoco.agent/docker/Dockerfile` | busybox 基础镜像 + `COPY ./jacocoagent.jar /jacocoagent.jar` |
+| `org.jacoco.agent/docker/build.sh` | 构建、校验、推送一体化脚本 |
+| `org.jacoco.agent/docker/.gitignore` | 忽略构建时拷贝的 `jacocoagent.jar` |
+| `org.jacoco.agent/docker/build-info.txt` | 每次构建自动写入：日期、git commit、jar sha256、镜像 digest、平台 |
+
+`build.sh` 流程：
+
+```
+1. 环境检查（docker buildx、JDK 17+）
+2. 默认执行 Maven 构建（--skip-maven 可跳过）
+   mvn -pl org.jacoco.agent,org.jacoco.agent.rt -am package -DskipTests
+3. 产物校验：文件存在、unzip -t、MANIFEST 含 Premain-Class；打印 sha256
+4. 拷贝到 org.jacoco.agent/docker/jacocoagent.jar（本地保留，不提交）
+5. docker buildx build \
+     --platform linux/amd64,linux/arm64 \
+     --tag harbor.fzzqft.com/qa/jacocoagent:latest \
+     --push org.jacoco.agent/docker/
+6. 推送后校验：
+   - docker buildx imagetools inspect（digest + 双平台）
+   - docker run --rm --platform linux/amd64 <image> sha256sum /jacocoagent.jar
+     与本地 sha256 比对，不一致则失败退出
+7. 写入 org.jacoco.agent/docker/build-info.txt
+```
+
+参数：
+
+| 参数 | 作用 |
+|---|---|
+| `--skip-maven` | 跳过 Maven，使用已有 `jacocoagent.jar` |
+| `--no-push` | 只构建不推送（调试） |
+| `-h/--help` | 帮助 |
+
+前提：
+
+- `JAVA_HOME` 指向 JDK 17+（agent 产物通过 `release=8` 输出 Java 8 字节码）；
+- 已执行 `docker login harbor.fzzqft.com`；
+- 旧工作目录 `/Users/kevin/Documents/Develop/docker/jacoco` 不再使用，保持原样。
+
+> `org.jacoco.agent/docker/jacocoagent.jar` 不提交 Git：避免历史持续累积二进制；
+> `build-info.txt` 中的 sha256 与 digest 足以追溯和对比，需要旧文件时可从 Harbor
+> 按旧 digest 拉取。
+
 ---
 
 ## 10. 升级 JaCoCo 源码步骤
@@ -520,6 +586,7 @@ AgentEnhancer.afterStartup(agentOptions, inst); // 下载服务 + 改写器（�
 | 下载返回 400 `URISyntaxException` | 路径未做 URL 编码（中文/空格必踩）；命令行用 `curl -G --data-urlencode`，门户 Java 端已用 `URLEncoder.encode` |
 | 应用启动看不到 `[jacoco-download] 已启动` | 检查 agent 是否生效（`Premain-Class` / `-javaagent` 参数），或下载端口 5 次冲突后放弃 |
 | 上报日志出现 `跳过` | `APP_NAME` / `FOUNDERSC_ENV` 与 IP 均未获取到；检查环境变量与网卡 |
+| 上报日志出现"失败/重试" | 检查 `deploy_ip` 是否已包含当前 Pod IP、`appName/env` 是否匹配；60 秒一次最多重试 10 次，FONE 更新后会自动成功 |
 | 门户记录的端口与 agent 实际端口不一致 | 以日志 `http 下载服务已启动: port=` 为准；`reportHttpPort` 会覆盖 `agentPort+100` 推算值 |
 | 请求返回 401 `unauthorized` | 未带 `X-Agent-Token` 或值不匹配；默认 token 为 `albert-einstein`，门户需配置同值，或两边同时配置 `off` 关闭 |
 | 启动失败：`Unknown agent option "httpToken"` | token 不能写在 `-javaagent:...=` 里；改用 `-Djacoco.httpToken`（放在 `-jar` 之前）或 `JACOCO_AGENT_TOKEN` |
